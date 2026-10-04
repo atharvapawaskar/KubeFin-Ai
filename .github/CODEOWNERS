@@ -1,0 +1,22 @@
+# CODEOWNERS — Team ownership for review enforcement
+# Replace placeholders with real GitHub usernames before enabling branch protection
+# TODO: Replace @MEMBER1_GITHUB, @MEMBER2_GITHUB, @MEMBER3_GITHUB with actual handles
+
+# Gateway — Member 1 (Vedant)
+/services/gateway/    @MEMBER1_GITHUB
+
+# Worker — Member 3 (Atharva)
+/services/worker/     @MEMBER3_GITHUB
+
+# Frontend — Member 2 (Om)
+/frontend/            @MEMBER2_GITHUB
+
+# Deploy — Member 3 (Atharva)
+/deploy/              @MEMBER3_GITHUB
+
+# Shared — All three members
+/contracts/           @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
+/docs/                @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
+/team/                @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
+/CLAUDE.md            @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
+/CONTRIBUTING.md      @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
