@@ -1,0 +1,188 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # Validate repository structure and documentation
+  validate-structure:
+    name: Validate Structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required files exist
+        run: |
+          set -e
+          required_files=(
+            "README.md"
+            "CLAUDE.md"
+            "CONTRIBUTING.md"
+            ".gitignore"
+            ".env.example"
+            "docker-compose.yml"
+            "docs/PRD.md"
+            "docs/ARCHITECTURE.md"
+            "docs/PHASES.md"
+            "team/TEAM.md"
+            "contracts/README.md"
+            ".github/CODEOWNERS"
+            ".github/pull_request_template.md"
+            ".github/workflows/ci.yml"
+          )
+          for f in "${required_files[@]}"; do
+            if [[ ! -f "$f" ]]; then
+              echo "::error::Missing required file: $f"
+              exit 1
+            fi
+          done
+          echo "All required files present"
+
+      - name: Check directory structure
+        run: |
+          set -e
+          required_dirs=(
+            "docs"
+            "team"
+            "contracts/api"
+            "contracts/events"
+            "contracts/db"
+            "contracts/redis"
+            "services/gateway"
+            "services/worker"
+            "frontend"
+            "deploy/docker"
+            "deploy/helm"
+            "deploy/k8s"
+            ".github/workflows"
+          )
+          for d in "${required_dirs[@]}"; do
+            if [[ ! -d "$d" ]]; then
+              echo "::error::Missing required directory: $d"
+              exit 1
+            fi
+          done
+          echo "All required directories present"
+
+      - name: Validate no Kafka in docker-compose
+        run: |
+          if grep -qi kafka docker-compose.yml; then
+            echo "::error::Kafka found in docker-compose.yml — not allowed in MVP"
+            exit 1
+          fi
+          echo "No Kafka in docker-compose.yml"
+
+      - name: Validate docker-compose has only MongoDB and Redis
+        run: |
+          services=$(grep -E '^\s{2}[a-z-]+:' docker-compose.yml | sed 's/://g' | tr -d ' ')
+          for s in $services; do
+            if [[ "$s" != "mongodb" && "$s" != "redis" ]]; then
+              echo "::error::Unexpected service in docker-compose.yml: $s (only mongodb and redis allowed)"
+              exit 1
+            fi
+          done
+          echo "docker-compose.yml contains only mongodb and redis"
+
+      - name: Validate no .github/CONTRIBUTING.md
+        run: |
+          if [[ -f ".github/CONTRIBUTING.md" ]]; then
+            echo "::error::.github/CONTRIBUTING.md exists — should only be at root"
+            exit 1
+          fi
+          echo "No .github/CONTRIBUTING.md"
+
+      - name: Validate no team/MEMORY.md
+        run: |
+          if [[ -f "team/MEMORY.md" ]]; then
+            echo "::error::team/MEMORY.md exists — not allowed"
+            exit 1
+          fi
+          echo "No team/MEMORY.md"
+
+      - name: Validate no docs/decisions directory
+        run: |
+          if [[ -d "docs/decisions" ]]; then
+            echo "::error::docs/decisions/ exists — not allowed"
+            exit 1
+          fi
+          echo "No docs/decisions/"
+
+      - name: Validate no BRAIN.md
+        run: |
+          if [[ -f "BRAIN.md" ]]; then
+            echo "::error::BRAIN.md exists — not allowed"
+            exit 1
+          fi
+          echo "No BRAIN.md"
+
+      - name: Check for placeholder GitHub usernames
+        run: |
+          if grep -r '@MEMBER[123]_GITHUB' --include="*.md" --include="*.yml" --include="*.yaml" .; then
+            echo "::warning::Placeholder GitHub usernames found — replace before enabling branch protection"
+          fi
+
+  # Contract validation (when contracts exist)
+  validate-contracts:
+    name: Validate Contracts
+    runs-on: ubuntu-latest
+    if: always()
+    needs: validate-structure
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for JSON schemas
+        run: |
+          if [[ -d "contracts/events" ]] && ls contracts/events/*.json 1> /dev/null 2>&1; then
+            echo "Event schemas found — will validate when AJV available"
+          else
+            echo "No event schemas yet — skipping validation"
+          fi
+
+          if [[ -d "contracts/api" ]] && ls contracts/api/*.yaml 1> /dev/null 2>&1; then
+            echo "OpenAPI specs found — will validate when Redocly available"
+          else
+            echo "No OpenAPI specs yet — skipping validation"
+          fi
+
+  # Node.js service validation (when services exist)
+  validate-services:
+    name: Validate Services (Placeholder)
+    runs-on: ubuntu-latest
+    if: always()
+    needs: validate-structure
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for package.json in services
+        run: |
+          for svc in services/gateway services/worker frontend; do
+            if [[ -f "$svc/package.json" ]]; then
+              echo "$svc has package.json — future CI will run lint/typecheck/test"
+            else
+              echo "$svc: no package.json yet"
+            fi
+          done
+
+  # Summary
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [validate-structure, validate-contracts, validate-services]
+    steps:
+      - name: Report status
+        run: |
+          echo "CI completed"
+          echo "Structure: ${{ needs.validate-structure.result }}"
+          echo "Contracts: ${{ needs.validate-contracts.result }}"
+          echo "Services: ${{ needs.validate-services.result }}"
+
+          if [[ "${{ needs.validate-structure.result }}" != "success" ]]; then
+            exit 1
+          fi
