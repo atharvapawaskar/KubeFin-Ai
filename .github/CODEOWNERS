@@ -3,20 +3,20 @@
 # TODO: Replace @MEMBER1_GITHUB, @MEMBER2_GITHUB, @MEMBER3_GITHUB with actual handles
 
 # Gateway — Member 1 (Vedant)
-/services/gateway/    @MEMBER1_GITHUB
+/services/gateway/    @vedant2403664104
 
 # Worker — Member 3 (Atharva)
-/services/worker/     @MEMBER3_GITHUB
+/services/worker/     @atharvapawaskar
 
 # Frontend — Member 2 (Om)
-/frontend/            @MEMBER2_GITHUB
+/frontend/            @Om0796
 
 # Deploy — Member 3 (Atharva)
-/deploy/              @MEMBER3_GITHUB
+/deploy/                @atharvapawaskar
 
 # Shared — All three members
-/contracts/           @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
-/docs/                @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
-/team/                @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
-/CLAUDE.md            @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
-/CONTRIBUTING.md      @MEMBER1_GITHUB @MEMBER2_GITHUB @MEMBER3_GITHUB
+/contracts/             @vedant2403664104 @atharvapawaskar  @Om0796
+/docs/                  @vedant2403664104 @atharvapawaskar  @Om0796
+/team/                  @vedant2403664104 @atharvapawaskar  @Om0796
+/CLAUDE.md              @vedant2403664104 @atharvapawaskar  @Om0796
+/CONTRIBUTING.md        @vedant2403664104 @atharvapawaskar  @Om0796
