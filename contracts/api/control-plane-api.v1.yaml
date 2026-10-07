@@ -1,0 +1,238 @@
+openapi: 3.0.3
+info:
+  title: Kubefin Control Plane API
+  version: 1.0.0
+  description: |
+    Contract between the Frontend (M2 - Om) and the Control Plane API (M3 - Atharva).
+    The frontend MUST NOT read MongoDB directly. All data comes through this API.
+    Collection shapes behind these responses are defined in contracts/db/.
+    Phases: 5 (spend analytics), 6 (budgets), 8 (recommendations).
+servers:
+  - url: http://localhost:4000
+    description: Local development
+tags:
+  - name: analytics
+  - name: budgets
+  - name: recommendations
+
+paths:
+  /api/v1/analytics/spend:
+    get:
+      tags: [analytics]
+      summary: Spend totals, trend and breakdown (FinOps Overview, Spend Analysis)
+      operationId: getSpend
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: granularity, in: query, schema: { type: string, enum: [hour, day], default: day } }
+        - { name: groupBy, in: query, schema: { type: string, enum: [tenant, team, workload, provider, model] } }
+        - { name: tenantId, in: query, schema: { type: string } }
+        - { name: teamId, in: query, schema: { type: string } }
+        - { name: workloadId, in: query, schema: { type: string } }
+        - { name: provider, in: query, schema: { type: string } }
+        - { name: model, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Spend result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SpendResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /api/v1/budgets:
+    get:
+      tags: [budgets]
+      summary: List budgets with current spend
+      operationId: listBudgets
+      parameters:
+        - { name: tenantId, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Budget list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Budget" }
+        "500": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [budgets]
+      summary: Create a budget
+      operationId: createBudget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BudgetInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Budget" }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /api/v1/budgets/{budgetId}:
+    parameters:
+      - { name: budgetId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [budgets]
+      operationId: getBudget
+      responses:
+        "200":
+          description: Budget
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Budget" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [budgets]
+      operationId: updateBudget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BudgetInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Budget" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [budgets]
+      operationId: deleteBudget
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/recommendations:
+    get:
+      tags: [recommendations]
+      summary: Ranked optimization recommendations (Optimization page)
+      operationId: listRecommendations
+      parameters:
+        - { name: tenantId, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [model, provider, cache] } }
+      responses:
+        "200":
+          description: Recommendations sorted by estimatedMonthlySavingsUsd desc
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Recommendation" }
+        "500": { $ref: "#/components/responses/Error" }
+
+components:
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: INVALID_RANGE }
+            message: { type: string }
+
+    SpendResponse:
+      type: object
+      required: [currency, totalUsd, series, breakdown]
+      properties:
+        currency: { type: string, enum: [USD] }
+        totalUsd: { type: number, minimum: 0 }
+        series:
+          type: array
+          description: Time series, ascending by bucketStart
+          items:
+            type: object
+            required: [bucketStart, costUsd, requests, inputTokens, outputTokens]
+            properties:
+              bucketStart: { type: string, format: date-time }
+              costUsd: { type: number, minimum: 0 }
+              requests: { type: integer, minimum: 0 }
+              inputTokens: { type: integer, minimum: 0 }
+              outputTokens: { type: integer, minimum: 0 }
+        breakdown:
+          type: array
+          description: Present only when groupBy is set; empty array otherwise. Sorted by costUsd desc.
+          items:
+            type: object
+            required: [key, costUsd, requests]
+            properties:
+              key: { type: string, description: "Value of the groupBy dimension" }
+              costUsd: { type: number, minimum: 0 }
+              requests: { type: integer, minimum: 0 }
+              avgLatencyMs: { type: number, minimum: 0 }
+              errorRate: { type: number, minimum: 0, maximum: 1 }
+
+    BudgetInput:
+      type: object
+      required: [tenantId, scope, limitUsd, period]
+      properties:
+        tenantId: { type: string }
+        scope:
+          type: object
+          required: [type]
+          properties:
+            type: { type: string, enum: [tenant, team, workload] }
+            id: { type: string, description: "Required unless type is tenant" }
+        limitUsd: { type: number, exclusiveMinimum: 0 }
+        period: { type: string, enum: [daily, monthly] }
+        alertThresholdPct: { type: integer, minimum: 1, maximum: 100, default: 80 }
+        enforcement: { type: string, enum: [hard, alert_only], default: hard }
+
+    Budget:
+      allOf:
+        - $ref: "#/components/schemas/BudgetInput"
+        - type: object
+          required: [id, currentSpendUsd, status, createdAt, updatedAt]
+          properties:
+            id: { type: string }
+            currentSpendUsd: { type: number, minimum: 0 }
+            status: { type: string, enum: [ok, warning, exceeded] }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+
+    Recommendation:
+      type: object
+      required: [id, type, title, description, estimatedMonthlySavingsUsd, action]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [model, provider, cache] }
+        title: { type: string }
+        description: { type: string }
+        estimatedMonthlySavingsUsd: { type: number, minimum: 0 }
+        affected:
+          type: object
+          properties:
+            workloadId: { type: string }
+            model: { type: string }
+            provider: { type: string }
+        action:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [switch_model, switch_provider, enable_cache] }
+            from: { type: string }
+            to: { type: string }

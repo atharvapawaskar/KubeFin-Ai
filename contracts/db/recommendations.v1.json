@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/db/recommendations.v1.json",
+  "title": "recommendations (MongoDB collection)",
+  "description": "Written by Worker (M3). Frontend (M2) accesses only via /api/v1/recommendations.",
+  "type": "object",
+  "required": ["_id", "tenantId", "type", "title", "description", "estimatedMonthlySavingsUsd", "action", "createdAt"],
+  "additionalProperties": false,
+  "properties": {
+    "_id": { "type": "string" },
+    "tenantId": { "type": "string", "minLength": 1 },
+    "type": { "enum": ["model", "provider", "cache"] },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "estimatedMonthlySavingsUsd": { "type": "number", "minimum": 0 },
+    "affected": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workloadId": { "type": "string" },
+        "model": { "type": "string" },
+        "provider": { "type": "string" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["switch_model", "switch_provider", "enable_cache"] },
+        "from": { "type": "string" },
+        "to": { "type": "string" }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" }
+  },
+  "examples": [
+    {
+      "_id": "rec_01",
+      "tenantId": "acme",
+      "type": "model",
+      "title": "Use a smaller model for summarization",
+      "description": "Workload summarizer uses a large model for short inputs.",
+      "estimatedMonthlySavingsUsd": 120.5,
+      "affected": { "workloadId": "summarizer", "model": "large-model" },
+      "action": { "kind": "switch_model", "from": "large-model", "to": "small-model" },
+      "createdAt": "2026-10-08T00:00:00Z"
+    }
+  ]
+}
