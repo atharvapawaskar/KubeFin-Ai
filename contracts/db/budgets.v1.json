@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/db/budgets.v1.json",
+  "title": "budgets (MongoDB collection)",
+  "description": "Written by Control Plane API (M3), read by Gateway (M1) for enforcement. Frontend (M2) accesses only via /api/v1/budgets.",
+  "type": "object",
+  "required": ["_id", "tenantId", "scope", "limitUsd", "period", "alertThresholdPct", "enforcement", "createdAt", "updatedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "_id": { "type": "string" },
+    "tenantId": { "type": "string", "minLength": 1 },
+    "scope": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["tenant", "team", "workload"] },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "limitUsd": { "type": "number", "exclusiveMinimum": 0 },
+    "period": { "enum": ["daily", "monthly"] },
+    "alertThresholdPct": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "enforcement": { "enum": ["hard", "alert_only"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "examples": [
+    {
+      "_id": "bud_01",
+      "tenantId": "acme",
+      "scope": { "type": "team", "id": "ml-platform" },
+      "limitUsd": 500,
+      "period": "monthly",
+      "alertThresholdPct": 80,
+      "enforcement": "hard",
+      "createdAt": "2026-10-08T00:00:00Z",
+      "updatedAt": "2026-10-08T00:00:00Z"
+    }
+  ]
+}
