@@ -59,27 +59,30 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 
 ## Phase 2 — Usage Event Pipeline
 
-**Goal**: Worker consumes events from Redis Streams, validates, enriches.
+**Goal**: Worker consumes usage events from Redis Streams, validates and enriches them, persists raw events idempotently, and dead-letters invalid or repeatedly failing deliveries.
 
-**Dependencies**: Phase 0 (Redis Streams), Phase 1 (event schema)
+**Dependencies**: Phase 0 (Redis Streams), reviewed usage-event, raw-event, and Redis contracts.
 
 **Major Tasks**:
 - Worker project scaffold (Node.js/TypeScript)
 - Redis Streams consumer group for `usage-events`
 - Event validation (JSON Schema)
-- Event enrichment (add metadata, timestamps)
-- Dead letter handling for invalid events
-- Exactly-once processing via consumer groups
+- Event enrichment (record ingestion timestamp)
+- Idempotent raw-event persistence before acknowledgement
+- Pending-entry recovery after restart
+- Dead letter handling for invalid events and retry-exhausted storage failures
+- Bounded batches and retries; no stream trimming before retention is agreed
 
 **Owner**: Atharva (M3)
 
 **Integration Points**:
 - Redis Streams (consumer)
-- Contracts: `contracts/events/usage-event.json`
+- Contracts: `contracts/events/usage-event.v1.json`, `contracts/db/usage-events.v1.json`, and `contracts/redis/keys.md`
 
 **Completion Criteria**:
 - Events flow Gateway → Redis Streams → Worker
-- Invalid events go to DLQ
+- Invalid events go to DLQ before source acknowledgement
+- Duplicate deliveries create one raw record
 - No event loss on restart
 
 ---
@@ -108,27 +111,27 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 
 ---
 
-## Phase 4 — Persistence and Aggregation
+## Phase 4 — Cost Aggregation
 
-**Goal**: Store raw events and hourly/daily rollups in MongoDB.
+**Goal**: Calculate cost and produce hourly/daily rollups from the raw events persisted in Phase 2.
 
-**Dependencies**: Phase 3
+**Dependencies**: Phase 2 raw-event records and Phase 3 pricing/cost calculation.
 
 **Major Tasks**:
-- MongoDB collections: `usage_events` (time-series), `cost_aggregations`
-- Write raw events with TTL
+- MongoDB collections: `usage_events`, `cost_aggregations`
 - Hourly rollup job (tenant, team, workload, provider, model)
 - Daily rollup job
 - Basic aggregation query API
+- Add retention/TTL only after the raw-event and aggregate retention contracts are approved
 
 **Owner**: Atharva (M3)
 
 **Integration Points**:
 - MongoDB
-- Contracts: `contracts/db/usage-events.json`, `contracts/db/cost-aggregations.json`
+- Contracts: `contracts/db/usage-events.v1.json`, `contracts/db/cost-aggregations.v1.json`
 
 **Completion Criteria**:
-- Events persisted with TTL
+- Raw events are already durably persisted in Phase 2; retention follows the approved contract
 - Rollups queryable via API
 - Query returns correct spend by tenant/provider/model
 

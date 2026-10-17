@@ -69,28 +69,26 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **Exit evidence:** PR #3 is merged. The Worker tests and local smoke checks are recorded in `STATE.md`. The `0.0.0.0` binding assumption still needs confirmation.
 
-### Stage 2 — Redis Streams event pipeline — NEXT, BLOCKED ON CONTRACTS
+### Stage 2 — Redis Streams event pipeline — IN PROGRESS, CONTRACT REVIEW REQUIRED
 
 **What we are doing:** Consuming Gateway usage events, validating them, storing raw events idempotently, and sending invalid or repeatedly failing events to a dead-letter queue (DLQ).
 
-**How we will do it:**
+**How we are doing it:**
 
-1. **Approve the usage-event contract.** Define version, required/optional fields, types, units, unknown-field behavior, and representative valid/invalid examples. Agree which Gateway outcomes emit an event, including provider failures and rejections.
-2. **Approve the Redis contract.** Define stream key, event envelope and encoding, group/consumer naming, concurrency, acknowledgement timing, reclaim/recovery behavior, retry rules, DLQ envelope/key, stream and DLQ retention, and producer failure/backpressure behavior.
-3. **Approve raw-event persistence.** Define document schema, collection type, unique event/idempotency key, indexes, optional identifier representation, and TTL/retention.
-4. **Agree on delivery and recovery semantics.** Decide what happens when persistence succeeds but a later processing step fails, and exactly when a stream entry is acknowledged.
-5. **Implement the consumer adapter** against the agreed stream and consumer-group conventions.
-6. **Implement schema validation** using the approved event schema. Keep payloads, prompts, completions, credentials, and PII out of logs.
-7. **Implement idempotent raw-event persistence** using the approved key and index semantics.
-8. **Implement retry and DLQ routing** using the approved retryable/permanent failure rules and threshold.
-9. **Verify recovery cases:** duplicate delivery, malformed payload, Worker restart, Redis redelivery, MongoDB outage, retry exhaustion, and DLQ handling.
-10. **Update Worker state/docs** with the contract references, implementation decisions, and completed checks.
+1. **Propose and review the usage-event contract.** The current v1 proposal defines version, identity, usage, attribution, and strict unknown-field behavior; agree which Gateway outcomes emit events.
+2. **Propose and review the Redis contract.** The current proposal defines the stream/envelope, consumer group, recovery, retry cap, DLQ format, and no-trimming policy.
+3. **Propose and review raw-event persistence.** The current proposal uses event ID as MongoDB `_id` for idempotency and leaves TTL unset until retention is decided.
+4. **Run the consumer adapter** with group creation at the beginning of the stream, `XAUTOCLAIM` recovery, schema validation, and bounded batches.
+5. **Persist before acknowledgement.** A duplicate event is harmless because `_id` is unique; errors remain pending for redelivery.
+6. **Route invalid and exhausted events to the DLQ.** The DLQ write and source acknowledgement run atomically; only stable error categories and bounded payload data are retained.
+7. **Verify recovery cases:** duplicate delivery, malformed payload, Worker restart, Redis redelivery, MongoDB outage, retry exhaustion, and DLQ handling.
+8. **Complete the review and integration gates.** Contract files are still proposals and the Gateway producer is not present in this checkout.
 
 **Why:** Redis Streams provides asynchronous decoupling from the Gateway. Validation and idempotency protect data quality; retries and a DLQ make failures inspectable and recoverable instead of silently losing usage.
 
 **Exit checks:** Valid Gateway events reach MongoDB, duplicate delivery does not create duplicate raw records, invalid/permanently failing entries follow the agreed DLQ policy, and restart/recovery behavior matches the contract.
 
-**Current gate:** Stage 2 cannot be safely implemented yet. The required event, raw-event, and Redis contracts are absent from `main`; the blocking checklist is also in `STATE.md`.
+**Current gate:** Worker-side code is implemented locally against proposed contracts. Contract review, live Gateway compatibility, and Redis/Mongo-backed recovery checks remain before Stage 2 can be called complete or pushed.
 
 ### Stage 3 — Cost engine and pricing
 
@@ -189,4 +187,3 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 3. Once the contracts are merged, implement Stage 2 in small slices: consumer and validation; persistence/idempotency; retry/DLQ and recovery.
 4. Add focused CI coverage for the Worker build/tests and contract validation as part of the relevant implementation/CI work.
 5. Start cost calculation only after the pricing and ownership decisions are settled.
-

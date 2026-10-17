@@ -1,9 +1,15 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { hostname } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { MongoClient } from 'mongodb';
 import { createClient } from 'redis';
 import { buildHealthApp } from './app.js';
 import { parseConfig } from './config.js';
-import { createMetricsRegistry, createMetricsServer } from './metrics.js';
+import { createMetricsRegistry, createMetricsServer, createUsageEventCounter } from './metrics.js';
+import { RedisUsageStreamPort } from './redis-stream-port.js';
+import { MongoUsageEventStore } from './usage-event-store.js';
+import type { UsageEventDocument } from './usage-event.js';
+import { UsageStreamConsumer } from './stream-consumer.js';
 
 async function main(): Promise<void> {
   const config = parseConfig(process.env);
@@ -28,11 +34,31 @@ async function main(): Promise<void> {
     },
   });
   redis.on('error', () => app.log.warn('Redis connection error'));
+  const stream = new RedisUsageStreamPort(redis, `${config.REDIS_USAGE_STREAM}:dlq`);
+  const eventStore = new MongoUsageEventStore(mongo.db().collection<UsageEventDocument>('usage_events'));
+  const registry = createMetricsRegistry();
+  const usageEventCounter = createUsageEventCounter(registry);
+  const consumer = new UsageStreamConsumer({
+    stream,
+    sink: eventStore,
+    logger: app.log,
+    onOutcome: (outcome) => usageEventCounter.inc({ outcome }),
+    config: {
+      stream: config.REDIS_USAGE_STREAM,
+      group: config.REDIS_USAGE_GROUP,
+      consumer: `${hostname()}-${process.pid}-${randomUUID()}`,
+      batchSize: config.WORKER_BATCH_SIZE,
+      blockMs: config.WORKER_BLOCK_MS,
+      claimIdleMs: config.WORKER_CLAIM_IDLE_MS,
+      maxDeliveries: config.WORKER_MAX_DELIVERIES,
+      maxPayloadBytes: config.WORKER_MAX_EVENT_BYTES,
+    },
+  });
 
-  const metricsServer = createMetricsServer(createMetricsRegistry());
+  const metricsServer = createMetricsServer(registry);
   let stopping = false;
   let shutdownPromise: Promise<void> | undefined;
-  let reconnectTask: Promise<void> | undefined;
+  let workerTask: Promise<void> | undefined;
   let reconnectAttempts = 0;
   const shutdownSignal = new AbortController();
 
@@ -74,9 +100,10 @@ async function main(): Promise<void> {
       app.log.info('Worker shutdown requested');
       await app.close();
       await closeMetricsServer();
-      if (redis.isReady) await redis.close();
-      else redis.destroy();
-      await reconnectTask;
+      // Interrupt an in-flight Redis connect/read so the consumer loop can observe
+      // shutdown promptly. Unacknowledged stream entries remain recoverable.
+      redis.destroy();
+      await workerTask;
       await mongo.close();
       app.log.info('Worker shutdown complete');
     })();
@@ -91,7 +118,19 @@ async function main(): Promise<void> {
     metricsServer.once('error', reject);
     metricsServer.listen(config.METRICS_PORT, '0.0.0.0', resolve);
   });
-  reconnectTask = reconnectDependencies();
+  workerTask = (async () => {
+    while (!stopping) {
+      await reconnectDependencies();
+      if (stopping) return;
+      try {
+        await consumer.run(shutdownSignal.signal);
+      } catch {
+        if (stopping) return;
+        app.log.warn('Worker event consumer stopped unexpectedly; restarting after backoff');
+        await delay(1_000, undefined, { signal: shutdownSignal.signal }).catch(() => undefined);
+      }
+    }
+  })();
   app.log.info({ port: config.PORT, metricsPort: config.METRICS_PORT }, 'Worker foundation started');
 }
 

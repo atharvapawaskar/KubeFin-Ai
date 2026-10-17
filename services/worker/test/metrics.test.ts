@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createMetricsRegistry, createMetricsServer } from '../src/metrics.js';
+import { createMetricsRegistry, createMetricsServer, createUsageEventCounter } from '../src/metrics.js';
+
+test('registers bounded-label counters for usage event outcomes', async () => {
+  const registry = createMetricsRegistry();
+  const events = createUsageEventCounter(registry);
+  events.inc({ outcome: 'inserted' });
+  events.inc({ outcome: 'dead_lettered' });
+  const body = await registry.metrics();
+  assert.match(body, /worker_usage_events_total\{outcome="inserted"\} 1/);
+  assert.match(body, /worker_usage_events_total\{outcome="dead_lettered"\} 1/);
+});
 
 test('serves Prometheus metrics only from the metrics listener path', async () => {
   const server = createMetricsServer(createMetricsRegistry());
