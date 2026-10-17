@@ -15,7 +15,7 @@
     "activeGeneration": { "oneOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
     "leaseOwner": { "type": ["string", "null"], "format": "uuid" },
     "leaseExpiresAt": { "type": ["string", "null"], "format": "date-time" },
-    "leaseFence": { "type": "integer", "minimum": 0, "maximum": 9223372036854776000 },
+    "leaseFence": { "type": "integer", "minimum": 0 },
     "updatedAt": { "type": "string", "format": "date-time" }
   },
   "examples": [
