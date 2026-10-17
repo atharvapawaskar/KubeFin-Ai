@@ -96,21 +96,25 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **How:** Use a versioned MongoDB pricing contract with exact provider/model/currency matching and effective intervals. The currency-aware v2 contract accepts ISO 4217 codes; `PRICING_CURRENCY` chooses the Worker deployment currency (default INR). Store rate integers as micro-units of that currency per million tokens. Calculate with integer arithmetic and store `costAmount` as Decimal128 with `costCurrency`. There is no automatic FX conversion; downstream aggregation must group by currency or apply a separately reviewed conversion policy. Persist events without a matching rate as `unpriced`; never substitute zero or a guessed price.
 
-**Current implementation:** Prepared on `m3/stage3-currency-implementation`, based on the PR #11 contract proposal branch. Build and 40 Worker tests pass; all 7 contract schemas/examples validate. Live Redis/Mongo integration, reviewed rate provisioning, migration execution, and provider billing reconciliation remain outstanding.
+**Current implementation:** Merged in PR #13, with state follow-up in PR #14. Currency-aware pricing, provenance, explicit unpriced handling, migration/backfill tooling, and test coverage are in place. Live Redis/Mongo integration, reviewed rate provisioning, migration execution, and provider billing reconciliation remain outstanding.
 
 **Why:** Usage counts are not spend until pricing rules are applied consistently and explainably.
 
 **Exit checks:** The contract is approved by both other members; unit/reference calculation cases pass; rate intervals cannot overlap within a provider/model/currency; costs identify their pricing record and currency; unmatched records remain visible as unpriced; live Redis/Mongo integration and provider billing reconciliation are verified after rates are populated.
 
-### Stage 4 — MongoDB persistence and aggregation
+### Stage 4 — MongoDB cost aggregation — IMPLEMENTED, CONTRACT MERGED
 
-**What we are doing:** Retaining raw events under the agreed retention policy and producing hourly/daily cost rollups.
+**What we are doing:** Producing hourly and daily cost/usage summaries from the persisted, priced or unpriced usage events.
 
-**How:** Implement the approved raw-event and cost-aggregation schemas, indexes, and TTL settings. Build aggregation jobs over the persisted data for agreed dimensions (such as tenant, team, workload, provider, and model). Ensure jobs can be retried or recomputed safely.
+**How:** PR #15 merged the shared `cost_aggregations` and `cost_aggregation_windows` contracts. The Worker CLI accepts an explicit UTC range and granularity, previews by default, and requires `--apply` to connect to MongoDB. Each window is rebuilt into a new generation under a fenced lease; the active pointer changes only after the full aggregation succeeds. Reads use only the published generation. Dimensions include tenant, team, workload, provider, model, currency, and pricing status. Amounts in different currencies remain separate; unpriced events contribute counts and tokens without a made-up cost. Explicit generation pruning is available only with a past cutoff; no automatic TTL/retention behavior is assumed.
 
-**Why:** Raw records support auditability and reprocessing; rollups keep analytics queries fast.
+**Why:** Rollups make spend analytics efficient while generation swaps keep readers on a complete snapshot during retries or rebuilds. Currency separation preserves monetary meaning.
 
-**Exit checks:** Raw and aggregate totals reconcile for known datasets; retention behaves as specified; duplicate job execution does not inflate totals; representative spend queries return correct values.
+**Current implementation:** Stage 4 Worker code is prepared on the implementation branch. The current USD-only Control Plane API was left unchanged; exposing currency-separated rollups over HTTP requires a separately reviewed API contract.
+
+**Verification:** TypeScript build and all 52 Worker tests passed with local loopback access; all 9 JSON contract schemas/examples validated; CLI syntax and `git diff --check` passed. Live MongoDB aggregation/concurrency and reconciliation could not be verified because MongoDB/Docker is unavailable in this environment.
+
+**Exit checks:** Review/merge the implementation; run against representative MongoDB data; reconcile event counts, token totals, and each currency independently; validate concurrent/repeated rebuilds and active-generation queries; agree an explicit retention policy before scheduling cleanup. A dashboard/API endpoint is a later stage with its own shared API contract.
 
 ### Stage 5 — Control Plane API for analytics
 
@@ -184,8 +188,8 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 ## 5. Immediate next actions
 
-1. Submit the currency-aware pricing v2 and usage-events v2 contract proposal to Vedant (M1) and Om (M2) for review.
-2. Review the legacy pricing index and data; then use the dry-run-first `pricing:migrate-index` command to replace the stricter index. The Worker never drops it automatically.
-3. Provision reviewed effective-dated rates in the configured currency.
-4. Run Worker tests and contract validation, then verify rate lookup, cost persistence, and unknown-rate behavior against live MongoDB/Redis.
-5. Compare representative calculated costs with provider invoices. Before Phase 4, agree to group by currency or define a reviewed FX policy.
+1. Review and merge the Stage 4 Worker implementation.
+2. Run the aggregation CLI in dry-run mode, then apply only after source and range checks.
+3. Reconcile representative rollups with raw events and provider billing records per currency.
+4. Agree an explicit snapshot retention/cleanup policy before automating pruning.
+5. Coordinate a reviewed currency-aware analytics API contract with Member 2 before exposing these rollups to the dashboard.
