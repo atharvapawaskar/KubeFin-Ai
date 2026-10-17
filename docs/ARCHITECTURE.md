@@ -137,6 +137,10 @@ Frontend Dashboard visualizes data
 
 **Non-functional**: Event lag < 30s, at-least-once Redis delivery with idempotent raw-event persistence
 
+### Control Plane Analytics API (`services/control-plane/`) — Owner: Atharva (M3)
+
+The API reads only published hourly/daily generations from `cost_aggregation_windows` and `cost_aggregations`. `GET /api/v2/analytics/spend` returns totals, observed time-series buckets, and an optional paginated breakdown. OIDC bearer tokens are checked against the configured issuer, audience, and HTTPS JWKS endpoint; a configured claim supplies the tenant IDs used to scope every query. Amounts are exact decimal strings, and currency and priced/unpriced groups are never combined. Dashboard integration is owned by Member 2.
+
 ### Frontend (`frontend/`) — Owner: Om (M2)
 React + TypeScript dashboard consuming Control Plane API. Pages: FinOps overview, Spend Analysis, Workload Insights, Budget Management, Optimization.
 
@@ -189,7 +193,7 @@ Pluggable adapters for OpenAI, Anthropic, Ollama (vLLM/TGI future)
 ## I. Security Principles
 
 - Transport: mTLS between services, TLS at ingress
-- Auth: API keys (gateway), JWT/OIDC (control plane API — future)
+- Auth: API keys (gateway), JWT/OIDC (Control Plane analytics API, configured issuer/audience/JWKS and tenant claim)
 - Secrets: Kubernetes Secrets, never in repo or logs
 - PII: Optional gateway middleware, never logged
 - Audit: All gateway decisions logged to `audit_logs` collection

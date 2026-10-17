@@ -53,7 +53,7 @@ kubefin/
 ├── docs/           # PRD, Architecture, Phases
 ├── team/           # TEAM.md
 ├── contracts/      # Shared interfaces (api/, events/, db/, redis/)
-├── services/       # gateway/, worker/
+├── services/       # gateway/, worker/, control-plane/
 ├── frontend/       # Dashboard
 ├── deploy/         # docker/, helm/, k8s/
 └── .github/        # CI, CODEOWNERS, PR template
