@@ -16,12 +16,13 @@ const event = {
 };
 
 const rate: PricingRate = {
+  pricingVersion: 2,
   _id: 'openai-example-model-2026-01',
   provider: 'openai',
   model: 'example-model',
-  currency: 'USD',
-  inputRateMicroUsdPerMillionTokens: 1_000_000,
-  outputRateMicroUsdPerMillionTokens: 2_000_000,
+  currency: 'INR',
+  inputRateMicrosPerMillionTokens: 1_000_000_000,
+  outputRateMicrosPerMillionTokens: 2_000_000_000,
   effectiveFrom: new Date('2026-01-01T00:00:00Z'),
   sourceUrl: 'https://provider.example/pricing',
   sourceVerifiedAt: new Date('2026-01-01T00:00:00Z'),
@@ -48,7 +49,8 @@ test('persists an event with stable identity, cost, pricing provenance, and inge
   assert.equal('eventId' in (inserted ?? {}), false);
   assert.equal(inserted?.receivedAt, new Date(inserted?.receivedAt ?? '').toISOString());
   assert.equal(inserted?.pricingStatus, 'priced');
-  assert.equal(inserted?.cost_usd?.toString(), '0.000210000000');
+  assert.equal(inserted?.costAmount?.toString(), '0.210000000000');
+  assert.equal(inserted?.costCurrency, 'INR');
   assert.equal(inserted?.pricingRecordId, rate._id);
 });
 
@@ -62,7 +64,8 @@ test('persists unmatched events as unpriced instead of inventing a cost', async 
   const store = new MongoUsageEventStore(collection, catalog());
   assert.equal(await store.persistIdempotently(event), 'unpriced');
   assert.equal(inserted?.pricingStatus, 'unpriced');
-  assert.equal('cost_usd' in (inserted ?? {}), false);
+  assert.equal('costAmount' in (inserted ?? {}), false);
+  assert.equal('costCurrency' in (inserted ?? {}), false);
 });
 
 test('classifies only a duplicate event-id index as an idempotent duplicate', async () => {
@@ -100,6 +103,7 @@ test('backfills a legacy Stage 2 raw event that has not been cost-enriched', asy
   assert.equal(await store.persistIdempotently(event), 'inserted');
   assert.deepEqual(update?.filter, { _id: event.eventId, pricingStatus: { $exists: false } });
   assert.equal((update?.update as { $set?: { pricingStatus?: string; pricingRecordId?: string } }).$set?.pricingStatus, 'priced');
+  assert.equal((update?.update as { $set?: { pricingStatus?: string; pricingRecordId?: string; costCurrency?: string } }).$set?.costCurrency, 'INR');
   assert.equal((update?.update as { $set?: { pricingStatus?: string; pricingRecordId?: string } }).$set?.pricingRecordId, rate._id);
 });
 

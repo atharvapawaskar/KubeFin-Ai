@@ -28,13 +28,14 @@ export interface UsageEventDocument extends Omit<UsageEvent, 'eventId'> {
   _id: string;
   receivedAt: string;
   pricingStatus: 'priced' | 'unpriced';
-  cost_usd?: Decimal128;
+  costAmount?: Decimal128;
+  costCurrency?: string;
   pricingRecordId?: string;
 }
 
 export function toUsageEventDocument(
   event: UsageEvent,
-  pricing: { recordId: string; costUsd: Decimal128 } | undefined,
+  pricing: { recordId: string; amount: Decimal128; currency: string } | undefined,
   receivedAt = new Date(),
 ): UsageEventDocument {
   const { eventId, ...fields } = event;
@@ -43,6 +44,6 @@ export function toUsageEventDocument(
     _id: eventId,
     receivedAt: receivedAt.toISOString(),
     pricingStatus: pricing ? 'priced' : 'unpriced',
-    ...(pricing ? { cost_usd: pricing.costUsd, pricingRecordId: pricing.recordId } : {}),
+    ...(pricing ? { costAmount: pricing.amount, costCurrency: pricing.currency, pricingRecordId: pricing.recordId } : {}),
   };
 }

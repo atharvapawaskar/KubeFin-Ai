@@ -3,11 +3,12 @@ import type { UsageEvent } from './usage-event.js';
 
 export interface PricingRate {
   _id: string;
+  pricingVersion: 2;
   provider: string;
   model: string;
-  currency: 'USD';
-  inputRateMicroUsdPerMillionTokens: number;
-  outputRateMicroUsdPerMillionTokens: number;
+  currency: string;
+  inputRateMicrosPerMillionTokens: number;
+  outputRateMicrosPerMillionTokens: number;
   effectiveFrom: Date;
   effectiveTo?: Date;
   sourceUrl: string;
@@ -19,12 +20,19 @@ export interface PricingCatalog {
 }
 
 export class MongoPricingCatalog implements PricingCatalog {
-  constructor(private readonly collection: Collection<PricingRate>) {}
+  constructor(
+    private readonly collection: Collection<PricingRate>,
+    private readonly currency: string,
+  ) {}
 
   async ensureIndexes(): Promise<void> {
     await this.collection.createIndex(
-      { provider: 1, model: 1, effectiveFrom: 1 },
-      { unique: true, name: 'pricing_provider_model_effective_from_unique' },
+      { provider: 1, model: 1, currency: 1, pricingVersion: 1, effectiveFrom: 1 },
+      {
+        unique: true,
+        name: 'pricing_provider_model_currency_version_effective_from_unique_v2',
+        partialFilterExpression: { pricingVersion: 2 },
+      },
     );
   }
 
@@ -34,6 +42,8 @@ export class MongoPricingCatalog implements PricingCatalog {
       .find({
         provider: event.provider,
         model: event.model,
+        currency: this.currency,
+        pricingVersion: 2,
         effectiveFrom: { $lte: occurredAt },
         $or: [{ effectiveTo: { $gt: occurredAt } }, { effectiveTo: { $exists: false } }],
       })
@@ -42,7 +52,7 @@ export class MongoPricingCatalog implements PricingCatalog {
       .toArray();
 
     if (matches.length > 1) {
-      throw new Error('Pricing intervals overlap for provider and model');
+      throw new Error('Pricing intervals overlap for provider, model, and currency');
     }
     return matches[0];
   }

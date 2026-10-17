@@ -28,18 +28,20 @@ test('rejects missing identity, negative usage, and uncontracted sensitive field
 test('uses event identity as the MongoDB idempotency key and adds pricing metadata', () => {
   const document = toUsageEventDocument(
     usageEventSchema.parse(validEvent),
-    { recordId: 'rate-1', costUsd: Decimal128.fromString('0.000123000000000') },
+    { recordId: 'rate-1', amount: Decimal128.fromString('0.000123000000000'), currency: 'INR' },
     new Date('2026-10-17T06:00:00Z'),
   );
   assert.equal(document._id, validEvent.eventId);
   assert.equal(document.receivedAt, '2026-10-17T06:00:00.000Z');
   assert.equal(document.pricingStatus, 'priced');
-  assert.equal(document.cost_usd?.toString(), Decimal128.fromString('0.000123000000000').toString());
+  assert.equal(document.costAmount?.toString(), Decimal128.fromString('0.000123000000000').toString());
+  assert.equal(document.costCurrency, 'INR');
   assert.equal(document.pricingRecordId, 'rate-1');
 });
 
 test('stores missing pricing as explicit unpriced metadata', () => {
   const document = toUsageEventDocument(usageEventSchema.parse(validEvent), undefined);
   assert.equal(document.pricingStatus, 'unpriced');
-  assert.equal('cost_usd' in document, false);
+  assert.equal('costAmount' in document, false);
+  assert.equal('costCurrency' in document, false);
 });

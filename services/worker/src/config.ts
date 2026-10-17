@@ -13,6 +13,10 @@ const environmentSchema = z
     }),
     REDIS_USAGE_STREAM: z.string().min(1).max(128).default('usage-events'),
     REDIS_USAGE_GROUP: z.string().min(1).max(128).default('kubefin-worker-v1'),
+    PRICING_CURRENCY: z.string().refine(
+      (currency) => Intl.supportedValuesOf('currency').includes(currency),
+      'must be a supported ISO 4217 currency code',
+    ).default('INR'),
     WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(10),
     WORKER_BLOCK_MS: z.coerce.number().int().min(100).max(30_000).default(5_000),
     WORKER_CLAIM_IDLE_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
