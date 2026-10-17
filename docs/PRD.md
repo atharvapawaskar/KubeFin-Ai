@@ -84,6 +84,6 @@ A Kubernetes-native gateway and control plane that provides:
 ## Important Open Questions
 
 1. **Auth model**: API keys only, or OAuth/OIDC for consumers?
-2. **Pricing source**: Hardcoded tables, or fetch from provider APIs?
+2. **Pricing source**: Proposal for Phase 3 review: curated, versioned rates from official provider-published pricing pages, stored in MongoDB. This avoids depending on provider pricing APIs; the team must approve the source/update process before production rate records are loaded.
 3. **Multi-tenancy**: Hard isolation (separate clusters) or soft (shared)?
 4. **Self-hosted models**: Ollama only, or vLLM/TGI support?

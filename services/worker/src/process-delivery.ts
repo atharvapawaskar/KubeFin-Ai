@@ -11,13 +11,13 @@ export type EventValidation<TEvent> =
 export interface DeliveryProcessor<TEvent> {
   validate: (payload: unknown) => EventValidation<TEvent> | Promise<EventValidation<TEvent>>;
   /** Must apply the approved event idempotency rule in its concrete adapter. */
-  persistIdempotently: (event: TEvent) => Promise<'inserted' | 'duplicate'>;
+  persistIdempotently: (event: TEvent) => Promise<'inserted' | 'duplicate' | 'unpriced'>;
   /** The adapter owns the approved DLQ key and serialized envelope. */
   deadLetter: (delivery: EventDelivery, issues: readonly unknown[]) => Promise<void>;
   acknowledge: (deliveryId: string) => Promise<void>;
 }
 
-export type DeliveryOutcome = 'inserted' | 'duplicate' | 'dead-lettered';
+export type DeliveryOutcome = 'inserted' | 'duplicate' | 'unpriced' | 'dead-lettered';
 
 /**
  * Process one delivery without deciding its transport, event, database, or DLQ schema.

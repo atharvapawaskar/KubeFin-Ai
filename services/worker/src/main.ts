@@ -7,6 +7,7 @@ import { buildHealthApp } from './app.js';
 import { parseConfig } from './config.js';
 import { createMetricsRegistry, createMetricsServer, createUsageEventCounter } from './metrics.js';
 import { RedisUsageStreamPort } from './redis-stream-port.js';
+import { MongoPricingCatalog } from './pricing-catalog.js';
 import { MongoUsageEventStore } from './usage-event-store.js';
 import type { UsageEventDocument } from './usage-event.js';
 import { UsageStreamConsumer } from './stream-consumer.js';
@@ -35,7 +36,11 @@ async function main(): Promise<void> {
   });
   redis.on('error', () => app.log.warn('Redis connection error'));
   const stream = new RedisUsageStreamPort(redis, `${config.REDIS_USAGE_STREAM}:dlq`);
-  const eventStore = new MongoUsageEventStore(mongo.db().collection<UsageEventDocument>('usage_events'));
+  const pricingCatalog = new MongoPricingCatalog(mongo.db().collection('pricing'));
+  const eventStore = new MongoUsageEventStore(
+    mongo.db().collection<UsageEventDocument>('usage_events'),
+    pricingCatalog,
+  );
   const registry = createMetricsRegistry();
   const usageEventCounter = createUsageEventCounter(registry);
   const consumer = new UsageStreamConsumer({
@@ -71,6 +76,7 @@ async function main(): Promise<void> {
         }
         await mongo.connect();
         await Promise.all([mongo.db().admin().command({ ping: 1 }), redis.ping()]);
+        await pricingCatalog.ensureIndexes();
         reconnectAttempts = 0;
         app.log.info('Worker dependencies are ready');
         return;

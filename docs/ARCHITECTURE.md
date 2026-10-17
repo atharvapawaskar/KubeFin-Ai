@@ -132,7 +132,7 @@ Frontend Dashboard visualizes data
 | Module | Responsibility |
 |--------|----------------|
 | `event-processor/` | Consume Redis Streams, validate, enrich |
-| `cost-engine/` | Calculate token + infra cost |
+| `cost-engine/` | Calculate token cost from a versioned MongoDB pricing catalog |
 | `aggregation-engine/` | Hourly/daily rollups |
 
 **Non-functional**: Event lag < 30s, at-least-once Redis delivery with idempotent raw-event persistence
@@ -142,6 +142,8 @@ React + TypeScript dashboard consuming Control Plane API. Pages: FinOps overview
 
 ### MongoDB
 The Stage 2 proposal stores `usage_events` in a regular collection with event ID as the unique `_id` so redelivery is idempotent. Time-series collections may be used for `cost_aggregations` and other data where the schema supports them. This raw-event collection choice is pending contract review.
+
+Phase 3 pricing records are keyed by exact provider/model and effective time range. Rates are curated from provider-published sources and stored in integer micro-USD per million tokens. Event costs are calculated with integer arithmetic, retain up to 12 decimal places in USD, and are stored as Decimal128 so later aggregation does not round every event. Events with no applicable rate remain persisted with `pricingStatus: unpriced` and no `cost_usd` value.
 
 ### Redis
 - Redis Streams: `usage-events` (single-stream MVP proposal; the Worker uses the `kubefin-worker-v1` consumer group and `usage-events:dlq`)

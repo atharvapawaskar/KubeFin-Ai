@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Decimal128 } from 'mongodb';
 
 /** Runtime counterpart of contracts/events/usage-event.v1.json. */
 export const usageEventSchema = z
@@ -14,8 +15,8 @@ export const usageEventSchema = z
     model: z.string().min(1).max(256),
     usage: z
       .object({
-        inputTokens: z.number().int().nonnegative(),
-        outputTokens: z.number().int().nonnegative(),
+        inputTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        outputTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
       })
       .strict(),
   })
@@ -26,13 +27,22 @@ export type UsageEvent = z.infer<typeof usageEventSchema>;
 export interface UsageEventDocument extends Omit<UsageEvent, 'eventId'> {
   _id: string;
   receivedAt: string;
+  pricingStatus: 'priced' | 'unpriced';
+  cost_usd?: Decimal128;
+  pricingRecordId?: string;
 }
 
-export function toUsageEventDocument(event: UsageEvent, receivedAt = new Date()): UsageEventDocument {
+export function toUsageEventDocument(
+  event: UsageEvent,
+  pricing: { recordId: string; costUsd: Decimal128 } | undefined,
+  receivedAt = new Date(),
+): UsageEventDocument {
   const { eventId, ...fields } = event;
   return {
     ...fields,
     _id: eventId,
     receivedAt: receivedAt.toISOString(),
+    pricingStatus: pricing ? 'priced' : 'unpriced',
+    ...(pricing ? { cost_usd: pricing.costUsd, pricingRecordId: pricing.recordId } : {}),
   };
 }
