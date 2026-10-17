@@ -1,0 +1,31 @@
+{
+  "name": "kubefin-worker",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "validate:contracts": "node scripts/validate-contracts.mjs",
+    "pricing:import": "node scripts/import-pricing.mjs",
+    "pricing:migrate-index": "node scripts/migrate-pricing-index.mjs",
+    "pricing:backfill": "npm run build && node scripts/backfill-costs.mjs",
+    "costs:aggregate": "npm run build && node scripts/aggregate-costs.mjs",
+    "start": "node dist/src/main.js",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@prometheus-io/client": "0.16.1",
+    "fastify": "5.12.7",
+    "mongodb": "7.7.0",
+    "redis": "6.3.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "typescript": "5.9.3"
+  }
+}

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://kubefin.local/contracts/events/usage-event.v1.json",
   "title": "usage-event (Redis Stream payload)",
-  "description": "Asynchronous usage event emitted by Gateway (M1) to Redis Stream 'usage-events' (published as the 'payload' field) for billable provider calls with trustworthy usage, consumed by Worker (M3) for cost calculation and aggregations.",
+  "description": "Asynchronous usage event emitted by Gateway (M1) to Redis Stream 'usage-events' (published as the 'payload' field) for billable provider calls with trustworthy usage, consumed by Worker (M3) for cost calculation and aggregations. Do not emit prompts, completions, credentials, or other secrets in usage events; serialized payloads are limited to 256 KiB by the Worker.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -33,16 +33,19 @@
     "tenantId": {
       "type": "string",
       "minLength": 1,
+      "maxLength": 256,
       "description": "Tenant identifier attributing the request."
     },
     "provider": {
       "type": "string",
       "minLength": 1,
+      "maxLength": 128,
       "description": "Open, non-empty canonical identifier for the LLM provider (e.g., 'openai', 'anthropic', 'gemini', 'ollama')."
     },
     "model": {
       "type": "string",
       "minLength": 1,
+      "maxLength": 256,
       "description": "Effective provider model ID used for the call (e.g., 'gpt-4o', 'claude-3-5-sonnet-20241022')."
     },
     "usage": {
@@ -71,16 +74,19 @@
     "requestId": {
       "type": "string",
       "minLength": 1,
+      "maxLength": 256,
       "description": "Gateway correlation ID for end-to-end tracing and debugging."
     },
     "teamId": {
       "type": "string",
       "minLength": 1,
+      "maxLength": 256,
       "description": "Optional team attribution identifier."
     },
     "workloadId": {
       "type": "string",
       "minLength": 1,
+      "maxLength": 256,
       "description": "Optional workload attribution identifier."
     }
   },
@@ -111,6 +117,33 @@
         "inputTokens": 2048,
         "outputTokens": 0
       }
+    }
+  ],
+  "invalidExamples": [
+    {
+      "schemaVersion": 1,
+      "eventId": "d2719f32-43c1-4f42-9b4a-b14b6ad9ac2a",
+      "occurredAt": "2026-10-17T05:00:00Z",
+      "tenantId": "acme",
+      "provider": "openai",
+      "model": "example-model",
+      "usage": {
+        "inputTokens": -1,
+        "outputTokens": 45
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "d2719f32-43c1-4f42-9b4a-b14b6ad9ac2a",
+      "occurredAt": "2026-10-17T05:00:00Z",
+      "tenantId": "acme",
+      "provider": "openai",
+      "model": "example-model",
+      "usage": {
+        "inputTokens": 120,
+        "outputTokens": 45
+      },
+      "prompt": "not allowed"
     }
   ]
 }

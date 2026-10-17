@@ -1,0 +1,156 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/db/cost-aggregations.v1.json",
+  "title": "cost_aggregations v1 (MongoDB collection)",
+  "description": "Versioned Stage 4 rollup snapshots. One document represents one UTC hour or day and one tenant/team/workload/provider/model/pricing-status/currency group. Windows are half-open [windowStart, windowEnd). Unpriced usage is retained in a separate group with currency null and no costAmount. Priced documents are always currency-specific; amounts from different currencies must never be added. generation identifies an immutable rebuild snapshot; readers use only the generation published by the corresponding cost_aggregation_windows document. No TTL or retention policy is implied.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_id", "schemaVersion", "granularity", "windowStart", "windowEnd", "tenantId", "teamId", "workloadId", "provider", "model", "currency", "pricingStatus", "eventCount", "totalInputTokens", "totalOutputTokens", "generation", "createdAt"],
+  "properties": {
+    "_id": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["granularity", "windowStart", "tenantId", "teamId", "workloadId", "provider", "model", "currency", "pricingStatus", "generation"],
+      "properties": {
+        "granularity": { "type": "string", "enum": ["hour", "day"] },
+        "windowStart": { "type": "string", "format": "date-time" },
+        "tenantId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "teamId": { "type": ["string", "null"], "maxLength": 256 },
+        "workloadId": { "type": ["string", "null"], "maxLength": 256 },
+        "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "currency": { "oneOf": [{ "type": "string", "pattern": "^[A-Z]{3}$" }, { "type": "null" }] },
+        "pricingStatus": { "type": "string", "enum": ["priced", "unpriced"] },
+        "generation": { "type": "string", "format": "uuid" }
+      }
+    },
+    "schemaVersion": { "const": 1 },
+    "granularity": { "type": "string", "enum": ["hour", "day"] },
+    "windowStart": { "type": "string", "format": "date-time" },
+    "windowEnd": { "type": "string", "format": "date-time" },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "teamId": { "type": ["string", "null"], "maxLength": 256 },
+    "workloadId": { "type": ["string", "null"], "maxLength": 256 },
+    "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "model": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "currency": { "oneOf": [{ "type": "string", "pattern": "^[A-Z]{3}$" }, { "type": "null" }] },
+    "pricingStatus": { "type": "string", "enum": ["priced", "unpriced"] },
+    "eventCount": { "type": "integer", "minimum": 1 },
+    "totalInputTokens": { "type": "integer", "minimum": 0 },
+    "totalOutputTokens": { "type": "integer", "minimum": 0 },
+    "costAmount": { "type": "number", "minimum": 0, "description": "Sum of priced source event costAmount values. Persist as MongoDB Decimal128. Present only for pricingStatus=priced." },
+    "generation": { "type": "string", "format": "uuid" },
+    "createdAt": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "pricingStatus": { "const": "priced" } }, "required": ["pricingStatus"] },
+      "then": {
+        "required": ["costAmount"],
+        "properties": { "currency": { "type": "string", "pattern": "^[A-Z]{3}$" } }
+      }
+    },
+    {
+      "if": { "properties": { "pricingStatus": { "const": "unpriced" } }, "required": ["pricingStatus"] },
+      "then": {
+        "not": { "required": ["costAmount"] },
+        "properties": { "currency": { "type": "null" } }
+      }
+    }
+  ],
+  "examples": [
+    {
+      "_id": {
+        "granularity": "hour",
+        "windowStart": "2026-10-17T05:00:00Z",
+        "tenantId": "acme",
+        "teamId": null,
+        "workloadId": null,
+        "provider": "openai",
+        "model": "example-model",
+        "currency": "INR",
+        "pricingStatus": "priced",
+        "generation": "c470e9f5-9d7f-4aa6-a12f-d88cc47102f3"
+      },
+      "schemaVersion": 1,
+      "granularity": "hour",
+      "windowStart": "2026-10-17T05:00:00Z",
+      "windowEnd": "2026-10-17T06:00:00Z",
+      "tenantId": "acme",
+      "teamId": null,
+      "workloadId": null,
+      "provider": "openai",
+      "model": "example-model",
+      "currency": "INR",
+      "pricingStatus": "priced",
+      "eventCount": 12,
+      "totalInputTokens": 1200,
+      "totalOutputTokens": 450,
+      "costAmount": 0.0021,
+      "generation": "c470e9f5-9d7f-4aa6-a12f-d88cc47102f3",
+      "createdAt": "2026-10-17T06:05:00Z"
+    },
+    {
+      "_id": {
+        "granularity": "day",
+        "windowStart": "2026-10-17T00:00:00Z",
+        "tenantId": "acme",
+        "teamId": "ml",
+        "workloadId": "summarizer",
+        "provider": "openai",
+        "model": "unknown-model",
+        "currency": null,
+        "pricingStatus": "unpriced",
+        "generation": "c470e9f5-9d7f-4aa6-a12f-d88cc47102f3"
+      },
+      "schemaVersion": 1,
+      "granularity": "day",
+      "windowStart": "2026-10-17T00:00:00Z",
+      "windowEnd": "2026-10-18T00:00:00Z",
+      "tenantId": "acme",
+      "teamId": "ml",
+      "workloadId": "summarizer",
+      "provider": "openai",
+      "model": "unknown-model",
+      "currency": null,
+      "pricingStatus": "unpriced",
+      "eventCount": 2,
+      "totalInputTokens": 30,
+      "totalOutputTokens": 9,
+      "generation": "c470e9f5-9d7f-4aa6-a12f-d88cc47102f3",
+      "createdAt": "2026-10-18T00:01:00Z"
+    }
+  ],
+  "invalidExamples": [
+    {
+      "_id": {
+        "granularity": "hour",
+        "windowStart": "2026-10-17T05:00:00Z",
+        "tenantId": "acme",
+        "teamId": null,
+        "workloadId": null,
+        "provider": "openai",
+        "model": "example-model",
+        "currency": null,
+        "pricingStatus": "priced",
+        "generation": "c470e9f5-9d7f-4aa6-a12f-d88cc47102f3"
+      },
+      "schemaVersion": 1,
+      "granularity": "hour",
+      "windowStart": "2026-10-17T05:00:00Z",
+      "windowEnd": "2026-10-17T06:00:00Z",
+      "tenantId": "acme",
+      "teamId": null,
+      "workloadId": null,
+      "provider": "openai",
+      "model": "example-model",
+      "currency": null,
+      "pricingStatus": "priced",
+      "eventCount": 1,
+      "totalInputTokens": 1,
+      "totalOutputTokens": 1,
+      "generation": "c470e9f5-9d7f-4aa6-a12f-d88cc47102f3",
+      "createdAt": "2026-10-17T06:05:00Z"
+    }
+  ]
+}

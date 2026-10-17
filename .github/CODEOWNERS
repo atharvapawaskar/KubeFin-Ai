@@ -8,6 +8,9 @@
 # Worker — Member 3 (Atharva)
 /services/worker/     @atharvapawaskar
 
+# Control Plane analytics API — Member 3 (Atharva)
+/services/control-plane/ @atharvapawaskar
+
 # Frontend — Member 2 (Om)
 /frontend/            @Om0796
 

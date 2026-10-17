@@ -88,7 +88,7 @@ Return Response to Application
 Gateway
     │
     ▼ (emit)
-Redis Streams: usage-events (partitioned by tenantId)
+Redis Streams: usage-events (single MVP stream; partitioning is deferred)
     │
     ▼ (consume)
 Worker: Event Processor
@@ -103,7 +103,7 @@ Worker: Aggregation Engine
     │   - Hourly/daily rollups by tenant, team, workload, provider, model
     ▼
 MongoDB: Collections
-    │   - usage_events (raw, time-series)
+    │   - usage_events (raw, regular collection with unique eventId _id)
     │   - cost_aggregations (rollups)
     │   - pricing (provider/model tables)
     ▼
@@ -132,19 +132,25 @@ Frontend Dashboard visualizes data
 | Module | Responsibility |
 |--------|----------------|
 | `event-processor/` | Consume Redis Streams, validate, enrich |
-| `cost-engine/` | Calculate token + infra cost |
+| `cost-engine/` | Calculate token cost from a versioned MongoDB pricing catalog |
 | `aggregation-engine/` | Hourly/daily rollups |
 
-**Non-functional**: Event lag < 30s, exactly-once semantics
+**Non-functional**: Event lag < 30s, at-least-once Redis delivery with idempotent raw-event persistence
+
+### Control Plane Analytics API (`services/control-plane/`) — Owner: Atharva (M3)
+
+The API reads only published hourly/daily generations from `cost_aggregation_windows` and `cost_aggregations`. `GET /api/v2/analytics/spend` returns totals, observed time-series buckets, and an optional paginated breakdown. OIDC bearer tokens are checked against the configured issuer, audience, and HTTPS JWKS endpoint; a configured claim supplies the tenant IDs used to scope every query. Amounts are exact decimal strings, and currency and priced/unpriced groups are never combined. Dashboard integration is owned by Member 2.
 
 ### Frontend (`frontend/`) — Owner: Om (M2)
 React + TypeScript dashboard consuming Control Plane API. Pages: FinOps overview, Spend Analysis, Workload Insights, Budget Management, Optimization.
 
 ### MongoDB
-Time-series collections: `usage_events`, `cost_aggregations`, `pricing`, `policies`, `budgets`, `audit_logs`
+The Stage 2 proposal stores `usage_events` in a regular collection with event ID as the unique `_id` so redelivery is idempotent. Time-series collections may be used for `cost_aggregations` and other data where the schema supports them. This raw-event collection choice is pending contract review.
+
+Phase 3 pricing records are keyed by exact provider/model/currency and effective time range. Rates are stored as integer micro-units of the declared ISO 4217 currency per million tokens. Each Worker deployment selects one pricing currency through `PRICING_CURRENCY` (default INR); there is no implicit foreign-exchange conversion. Event costs use integer arithmetic and are stored as Decimal128 in `costAmount` with the matching `costCurrency`, retaining up to 12 decimal places. Events with no applicable rate remain persisted as `unpriced`. Downstream aggregation must keep currencies separate or use an explicitly reviewed FX policy.
 
 ### Redis
-- Redis Streams: `usage-events` (partitioned by tenantId)
+- Redis Streams: `usage-events` (single-stream MVP proposal; the Worker uses the `kubefin-worker-v1` consumer group and `usage-events:dlq`)
 - Rate limiting counters
 - Budget counters
 - Caching (future)
@@ -181,13 +187,13 @@ Pluggable adapters for OpenAI, Anthropic, Ollama (vLLM/TGI future)
 
 - **Gateway**: Circuit breaker per provider, exponential backoff, fallback to secondary provider
 - **Worker**: Dead letter queue for failed events, retry with backoff, idempotent processing
-- **MongoDB**: Replica set, time-series collections with TTL
-- **Redis**: Redis Streams consumer groups for exactly-once, persistence enabled
+- **MongoDB**: Replica set; raw events use an idempotency key, and retention/TTL follows the approved collection contract
+- **Redis**: Redis Streams consumer groups provide at-least-once delivery; idempotent writes and pending-entry recovery handle redelivery
 
 ## I. Security Principles
 
 - Transport: mTLS between services, TLS at ingress
-- Auth: API keys (gateway), JWT/OIDC (control plane API — future)
+- Auth: API keys (gateway), JWT/OIDC (Control Plane analytics API, configured issuer/audience/JWKS and tenant claim)
 - Secrets: Kubernetes Secrets, never in repo or logs
 - PII: Optional gateway middleware, never logged
 - Audit: All gateway decisions logged to `audit_logs` collection

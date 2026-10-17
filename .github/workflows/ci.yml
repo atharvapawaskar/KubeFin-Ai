@@ -56,6 +56,7 @@ jobs:
             "contracts/redis"
             "services/gateway"
             "services/worker"
+            "services/control-plane"
             "frontend"
             "deploy/docker"
             "deploy/helm"
@@ -127,7 +128,7 @@ jobs:
             echo "::warning::Placeholder GitHub usernames found — replace before enabling branch protection"
           fi
 
-  # Contract validation (when contracts exist)
+  # Validate shared JSON schemas and their examples.
   validate-contracts:
     name: Validate Contracts
     runs-on: ubuntu-latest
@@ -136,34 +137,58 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check for JSON schemas
-        run: |
-          if [[ -d "contracts/events" ]] && ls contracts/events/*.json 1> /dev/null 2>&1; then
-            echo "Event schemas found — will validate when AJV available"
-          else
-            echo "No event schemas yet — skipping validation"
-          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: services/worker/.nvmrc
+          cache: npm
+          cache-dependency-path: services/worker/package-lock.json
 
-          if [[ -d "contracts/api" ]] && ls contracts/api/*.yaml 1> /dev/null 2>&1; then
-            echo "OpenAPI specs found — will validate when Redocly available"
-          else
-            echo "No OpenAPI specs yet — skipping validation"
-          fi
+      - name: Install Worker dependencies
+        working-directory: services/worker
+        run: npm ci
 
-  # Node.js service validation (when services exist)
+      - name: Validate event and database contracts
+        working-directory: services/worker
+        run: npm run validate:contracts
+
+  # Build and test implemented backend services.
   validate-services:
-    name: Validate Services (Placeholder)
+    name: Validate Services
     runs-on: ubuntu-latest
     if: always()
     needs: validate-structure
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check for package.json in services
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: services/worker/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            services/worker/package-lock.json
+            services/control-plane/package-lock.json
+
+      - name: Install Worker dependencies
+        working-directory: services/worker
+        run: npm ci
+
+      - name: Build and run Worker tests
+        working-directory: services/worker
+        run: npm test
+
+      - name: Install Control Plane dependencies
+        working-directory: services/control-plane
+        run: npm ci
+
+      - name: Build and run Control Plane tests
+        working-directory: services/control-plane
+        run: npm test
+
+      - name: Report other service packages
         run: |
-          for svc in services/gateway services/worker frontend; do
+          for svc in services/gateway frontend; do
             if [[ -f "$svc/package.json" ]]; then
-              echo "$svc has package.json — future CI will run lint/typecheck/test"
+              echo "$svc has package.json"
             else
               echo "$svc: no package.json yet"
             fi
