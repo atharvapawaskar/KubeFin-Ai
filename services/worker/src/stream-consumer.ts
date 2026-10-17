@@ -47,7 +47,7 @@ export interface UsageStreamPort {
 }
 
 export interface UsageEventSink {
-  persistIdempotently(event: UsageEvent): Promise<'inserted' | 'duplicate'>;
+  persistIdempotently(event: UsageEvent): Promise<'inserted' | 'duplicate' | 'unpriced'>;
 }
 
 export interface ConsumerLogger {
@@ -71,7 +71,7 @@ export interface UsageStreamConsumerDependencies {
   sink: UsageEventSink;
   logger: ConsumerLogger;
   config: UsageStreamConsumerConfig;
-  onOutcome?: (outcome: 'inserted' | 'duplicate' | 'dead_lettered' | 'retrying') => void;
+  onOutcome?: (outcome: 'inserted' | 'duplicate' | 'unpriced' | 'dead_lettered' | 'retrying') => void;
 }
 
 export class UsageStreamConsumer {

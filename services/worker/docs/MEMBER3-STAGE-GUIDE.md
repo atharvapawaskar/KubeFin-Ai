@@ -69,7 +69,7 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **Exit evidence:** PR #3 is merged. The Worker tests and local smoke checks are recorded in `STATE.md`. The `0.0.0.0` binding assumption still needs confirmation.
 
-### Stage 2 — Redis Streams event pipeline — IN PROGRESS, CONTRACT REVIEW REQUIRED
+### Stage 2 — Redis Streams event pipeline — IMPLEMENTED, MERGED
 
 **What we are doing:** Consuming Gateway usage events, validating them, storing raw events idempotently, and sending invalid or repeatedly failing events to a dead-letter queue (DLQ).
 
@@ -82,23 +82,23 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 5. **Persist before acknowledgement.** A duplicate event is harmless because `_id` is unique; errors remain pending for redelivery.
 6. **Route invalid and exhausted events to the DLQ.** The DLQ write and source acknowledgement run atomically; only stable error categories and bounded payload data are retained.
 7. **Verify recovery cases:** duplicate delivery, malformed payload, Worker restart, Redis redelivery, MongoDB outage, retry exhaustion, and DLQ handling.
-8. **Complete the review and integration gates.** Contract files are still proposals and the Gateway producer is not present in this checkout.
+8. **Integration verification remains.** Run Redis/Mongo-backed recovery checks with the Gateway producer when that service is available.
 
 **Why:** Redis Streams provides asynchronous decoupling from the Gateway. Validation and idempotency protect data quality; retries and a DLQ make failures inspectable and recoverable instead of silently losing usage.
 
 **Exit checks:** Valid Gateway events reach MongoDB, duplicate delivery does not create duplicate raw records, invalid/permanently failing entries follow the agreed DLQ policy, and restart/recovery behavior matches the contract.
 
-**Current gate:** Worker-side code is implemented locally against proposed contracts. Contract review, live Gateway compatibility, and Redis/Mongo-backed recovery checks remain before Stage 2 can be called complete or pushed.
+**Current status:** The Stage 2 contracts and Worker implementation were merged in PRs #7 and #8. Unit and contract checks passed. Live Redis/Mongo recovery and Gateway compatibility were not verified in this environment.
 
 ### Stage 3 — Cost engine and pricing
 
-**What we are doing:** Calculating per-event AI cost from provider/model usage and pricing data.
+**What we are doing:** Calculating per-event AI cost from provider/model usage and versioned pricing data.
 
-**How:** First resolve cost ownership and approve the pricing schema, source/update process, currency/unit, precision, rounding, and handling for unknown models or missing usage. Implement a pure calculation module, then connect it to the event processing path and compare results against agreed examples.
+**How:** Propose a versioned MongoDB pricing contract with exact provider/model matching, effective time intervals, USD rates, and an official source URL/verification timestamp. Store rates as integer micro-USD per million tokens. Calculate with integer arithmetic and store `cost_usd` as Decimal128 with sub-micro-dollar precision so aggregation does not round each event. Persist events without a matching rate as `unpriced`; never substitute zero or a guessed price. Populate production rates only from provider-published pricing and verify representative invoices.
 
 **Why:** Usage counts are not spend until pricing rules are applied consistently and explainably.
 
-**Exit checks:** Reference cases match the agreed calculation rules; unknown pricing does not silently produce a misleading cost; pricing versions/sources can be traced.
+**Exit checks:** The contract is approved by both other members; unit/reference calculation cases pass; rate intervals cannot overlap; costs identify their pricing record; unmatched records remain visible as unpriced; live Redis/Mongo integration and provider billing reconciliation are verified after rates are populated.
 
 ### Stage 4 — MongoDB persistence and aggregation
 
@@ -182,8 +182,8 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 ## 5. Immediate next actions
 
-1. Coordinate with Members 1 and 2 to get the usage-event, raw-event, cost-aggregation, and Redis contracts proposed and approved.
-2. Resolve event outcomes, idempotency key/index, acknowledgement/retry/DLQ behavior, retention, and cost ownership/precision.
-3. Once the contracts are merged, implement Stage 2 in small slices: consumer and validation; persistence/idempotency; retry/DLQ and recovery.
-4. Add focused CI coverage for the Worker build/tests and contract validation as part of the relevant implementation/CI work.
-5. Start cost calculation only after the pricing and ownership decisions are settled.
+1. Review the Phase 3 pricing contract proposal with Vedant (M1) and Om (M2), as both are required contract reviewers.
+2. Provision reviewed effective-dated rates from official provider sources into MongoDB's `pricing` collection.
+3. Run worker tests and contract validation, then verify rate lookup, cost persistence, and unknown-rate behavior against live MongoDB/Redis.
+4. Compare representative calculated costs with provider invoices before treating spend totals as production-accurate.
+5. After Phase 3 review and integration gates pass, proceed to Phase 4 cost aggregation.

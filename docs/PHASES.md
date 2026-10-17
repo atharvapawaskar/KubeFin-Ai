@@ -94,20 +94,26 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 **Dependencies**: Phase 2
 
 **Major Tasks**:
-- Pricing table (provider/model → cost per 1K tokens)
-- Cost engine: input_tokens × rate + output_tokens × rate
-- Infra cost attribution (optional, placeholder)
-- Unit tests for cost calculation accuracy
+- Versioned pricing catalog keyed by exact provider/model and effective time range
+- Curate rates from provider-published price sources; no live provider pricing API is assumed
+- Cost engine: input_tokens × input rate + output_tokens × output rate
+- Store per-event cost as MongoDB Decimal128 with sub-micro-dollar precision for exact aggregation
+- Persist unmatched events as unpriced, preserving raw usage for later reconciliation
+- Unit tests for rate lookup, rounding, unmatched rates, and cost calculation accuracy
 
 **Owner**: Atharva (M3)
 
 **Integration Points**:
-- Contracts: `contracts/db/pricing.json`
-- Worker event processor
+- Contracts: `contracts/db/pricing.v1.json` and `contracts/db/usage-events.v1.json`
+- Worker event processor and MongoDB `pricing` / `usage_events` collections
 
 **Completion Criteria**:
-- Each event enriched with `cost_usd` field
-- Accuracy verified against provider billing (100%)
+- Events with one applicable pricing record are enriched with `cost_usd` and `pricingRecordId`
+- Events without a matching rate are retained as `unpriced` and never assigned an estimated zero cost
+- Rate records identify currency, effective interval, source URL, and verification time
+- Calculation and rounding match agreed reference cases; production accuracy is verified against provider billing once real rates are provisioned
+
+**Accuracy boundary:** Usage-event v1 currently carries only input and output token counts. Provider billing can also vary by cached tokens, cache-write mode, batch/service tier, or context length. The initial calculator covers the base input/output rates only; exact invoice reconciliation for those other modes requires an M1-reviewed event-contract extension and Gateway emission.
 
 ---
 

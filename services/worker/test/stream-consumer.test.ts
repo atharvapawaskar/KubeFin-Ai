@@ -70,7 +70,7 @@ class FakeStream implements UsageStreamPort {
 
 async function runOnce(options: {
   entry: StreamEntry;
-  persist?: (event: UsageEvent) => Promise<'inserted' | 'duplicate'>;
+  persist?: (event: UsageEvent) => Promise<'inserted' | 'duplicate' | 'unpriced'>;
   deliveries?: number;
   maxPayloadBytes?: number;
 }): Promise<{ stream: FakeStream; logMessages: string[]; outcomes: string[] }> {

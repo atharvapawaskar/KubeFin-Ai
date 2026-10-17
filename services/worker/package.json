@@ -8,6 +8,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "validate:contracts": "node scripts/validate-contracts.mjs",
+    "pricing:import": "node scripts/import-pricing.mjs",
+    "pricing:backfill": "npm run build && node scripts/backfill-costs.mjs",
     "start": "node dist/src/main.js",
     "test": "npm run build && node --test dist/test/*.test.js"
   },

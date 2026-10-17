@@ -8,9 +8,11 @@ test('registers bounded-label counters for usage event outcomes', async () => {
   const events = createUsageEventCounter(registry);
   events.inc({ outcome: 'inserted' });
   events.inc({ outcome: 'dead_lettered' });
+  events.inc({ outcome: 'unpriced' });
   const body = await registry.metrics();
   assert.match(body, /worker_usage_events_total\{outcome="inserted"\} 1/);
   assert.match(body, /worker_usage_events_total\{outcome="dead_lettered"\} 1/);
+  assert.match(body, /worker_usage_events_total\{outcome="unpriced"\} 1/);
 });
 
 test('serves Prometheus metrics only from the metrics listener path', async () => {
