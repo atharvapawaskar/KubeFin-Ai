@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/db/pricing.v2.json",
+  "title": "pricing v2 (MongoDB collection)",
+  "description": "Versioned token rates curated from provider-published pricing. Rates are expressed as integer micro-units of the declared ISO 4217 currency per one million tokens. effectiveTo is exclusive; rate intervals for one provider/model/currency must not overlap.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_id", "pricingVersion", "provider", "model", "currency", "inputRateMicrosPerMillionTokens", "outputRateMicrosPerMillionTokens", "effectiveFrom", "sourceUrl", "sourceVerifiedAt"],
+  "properties": {
+    "_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "pricingVersion": { "const": 2 },
+    "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "model": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "ISO 4217 currency code, for example INR or USD." },
+    "inputRateMicrosPerMillionTokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "outputRateMicrosPerMillionTokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "effectiveFrom": { "type": "string", "format": "date-time" },
+    "effectiveTo": { "type": "string", "format": "date-time" },
+    "sourceUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "sourceVerifiedAt": { "type": "string", "format": "date-time" }
+  },
+  "examples": [
+    {
+      "_id": "example-provider-example-model-inr-2026-01",
+      "pricingVersion": 2,
+      "provider": "example-provider",
+      "model": "example-model",
+      "currency": "INR",
+      "inputRateMicrosPerMillionTokens": 850000000,
+      "outputRateMicrosPerMillionTokens": 1700000000,
+      "effectiveFrom": "2026-01-01T00:00:00Z",
+      "sourceUrl": "https://example.invalid/pricing",
+      "sourceVerifiedAt": "2026-01-01T00:00:00Z"
+    },
+    {
+      "_id": "example-provider-example-model-usd-2026-01",
+      "pricingVersion": 2,
+      "provider": "example-provider",
+      "model": "example-model",
+      "currency": "USD",
+      "inputRateMicrosPerMillionTokens": 1000000,
+      "outputRateMicrosPerMillionTokens": 2000000,
+      "effectiveFrom": "2026-01-01T00:00:00Z",
+      "sourceUrl": "https://example.invalid/pricing",
+      "sourceVerifiedAt": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "invalidExamples": [
+    {
+      "_id": "invalid-rate",
+      "pricingVersion": 2,
+      "provider": "example-provider",
+      "model": "example-model",
+      "currency": "INR",
+      "inputRateMicrosPerMillionTokens": -1,
+      "outputRateMicrosPerMillionTokens": 2000000,
+      "effectiveFrom": "2026-01-01T00:00:00Z",
+      "sourceUrl": "http://example.invalid/pricing",
+      "sourceVerifiedAt": "2026-01-01T00:00:00Z"
+    }
+  ]
+}
