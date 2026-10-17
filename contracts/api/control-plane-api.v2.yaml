@@ -1,0 +1,260 @@
+openapi: 3.0.3
+info:
+  title: Kubefin Control Plane Analytics API
+  version: 2.0.0
+  description: |
+    Stage 5 currency-safe spend analytics contract between the Control Plane API
+    (M3) and dashboard (M2). API v1 remains unchanged. Amounts from different
+    currencies are never combined. Tenant filters must be authorized against the
+    verified bearer principal before any data query.
+servers:
+  - url: http://localhost:4000
+    description: Local development only
+tags:
+  - name: analytics
+paths:
+  /api/v2/analytics/spend:
+    get:
+      tags: [analytics]
+      summary: Return spend totals, time series, and an optional breakdown
+      operationId: getSpendV2
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: Inclusive UTC window start, aligned to granularity.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          description: Exclusive UTC window end, aligned to granularity.
+          schema: { type: string, format: date-time }
+        - name: granularity
+          in: query
+          description: UTC rollup window size; supported ranges are at most 744 hourly or 366 daily windows.
+          schema: { type: string, enum: [hour, day], default: day }
+        - name: groupBy
+          in: query
+          description: Optional dimension for the paginated breakdown.
+          schema: { type: string, enum: [tenant, team, workload, provider, model] }
+        - name: tenantId
+          in: query
+          description: Optional tenant filter. Every selected tenant must be authorized for the bearer principal.
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: teamId
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: workloadId
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: provider
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: model
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: currency
+          in: query
+          description: Optional ISO 4217 filter. Omit to return currencies separately; no FX conversion is performed.
+          schema: { type: string, pattern: '^[A-Z]{3}$' }
+        - name: pricingStatus
+          in: query
+          description: Omit to include priced and unpriced usage as separate groups.
+          schema: { type: string, enum: [priced, unpriced] }
+        - name: pageSize
+          in: query
+          description: Breakdown page size only; totals and series cover the complete requested range.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          description: Opaque continuation token, valid only with the same query filters and range.
+          schema: { type: string, minLength: 1, maxLength: 2048 }
+      responses:
+        '200':
+          description: Spend data grouped by currency and pricing status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpendResponse' }
+        '400':
+          description: Invalid or unsupported filters, range, cursor, or granularity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Principal is not authorized for the requested tenant scope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Unexpected server error.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Aggregation data is not available.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Issuer and audience are deployment configuration. The API must fail
+        closed if verification configuration is absent and authorize each
+        requested tenant against the verified principal.
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [INVALID_RANGE, INVALID_FILTER, INVALID_CURSOR, UNAUTHENTICATED, FORBIDDEN, RATE_LIMITED, INTERNAL_ERROR, DATA_UNAVAILABLE]
+            message: { type: string, maxLength: 512 }
+    PricedTotal:
+      type: object
+      additionalProperties: false
+      required: [currency, pricingStatus, costAmount, requests, inputTokens, outputTokens]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        pricingStatus: { type: string, enum: [priced] }
+        costAmount:
+          type: string
+          pattern: '^(0|[1-9][0-9]*)(\\.[0-9]+)?$'
+          description: Exact base-10 amount, without exponent notation or rounding.
+        requests: { type: integer, minimum: 0 }
+        inputTokens: { type: integer, minimum: 0 }
+        outputTokens: { type: integer, minimum: 0 }
+    UnpricedTotal:
+      type: object
+      additionalProperties: false
+      required: [currency, pricingStatus, requests, inputTokens, outputTokens]
+      properties:
+        currency:
+          type: string
+          nullable: true
+          enum: [null]
+          description: Always null for unpriced usage.
+        pricingStatus: { type: string, enum: [unpriced] }
+        requests: { type: integer, minimum: 0 }
+        inputTokens: { type: integer, minimum: 0 }
+        outputTokens: { type: integer, minimum: 0 }
+    PricedBucket:
+      type: object
+      additionalProperties: false
+      required: [bucketStart, currency, pricingStatus, costAmount, requests, inputTokens, outputTokens]
+      properties:
+        bucketStart: { type: string, format: date-time }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        pricingStatus: { type: string, enum: [priced] }
+        costAmount:
+          type: string
+          pattern: '^(0|[1-9][0-9]*)(\\.[0-9]+)?$'
+          description: Exact base-10 amount, without exponent notation or rounding.
+        requests: { type: integer, minimum: 0 }
+        inputTokens: { type: integer, minimum: 0 }
+        outputTokens: { type: integer, minimum: 0 }
+    UnpricedBucket:
+      type: object
+      additionalProperties: false
+      required: [bucketStart, currency, pricingStatus, requests, inputTokens, outputTokens]
+      properties:
+        bucketStart: { type: string, format: date-time }
+        currency:
+          type: string
+          nullable: true
+          enum: [null]
+        pricingStatus: { type: string, enum: [unpriced] }
+        requests: { type: integer, minimum: 0 }
+        inputTokens: { type: integer, minimum: 0 }
+        outputTokens: { type: integer, minimum: 0 }
+    PricedBreakdown:
+      type: object
+      additionalProperties: false
+      required: [key, currency, pricingStatus, costAmount, requests, inputTokens, outputTokens]
+      properties:
+        key: { type: string, nullable: true, maxLength: 256 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        pricingStatus: { type: string, enum: [priced] }
+        costAmount:
+          type: string
+          pattern: '^(0|[1-9][0-9]*)(\\.[0-9]+)?$'
+        requests: { type: integer, minimum: 0 }
+        inputTokens: { type: integer, minimum: 0 }
+        outputTokens: { type: integer, minimum: 0 }
+    UnpricedBreakdown:
+      type: object
+      additionalProperties: false
+      required: [key, currency, pricingStatus, requests, inputTokens, outputTokens]
+      properties:
+        key: { type: string, nullable: true, maxLength: 256 }
+        currency:
+          type: string
+          nullable: true
+          enum: [null]
+        pricingStatus: { type: string, enum: [unpriced] }
+        requests: { type: integer, minimum: 0 }
+        inputTokens: { type: integer, minimum: 0 }
+        outputTokens: { type: integer, minimum: 0 }
+    SpendResponse:
+      type: object
+      additionalProperties: false
+      required: [from, to, granularity, totals, series, breakdown]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        granularity: { type: string, enum: [hour, day] }
+        totals:
+          type: array
+          description: Full-range totals; currencies and priced/unpriced status remain separate.
+          items:
+            oneOf:
+              - { $ref: '#/components/schemas/PricedTotal' }
+              - { $ref: '#/components/schemas/UnpricedTotal' }
+        series:
+          type: array
+          description: One entry per observed bucket and currency/status, ordered by bucketStart, currency, and status. Missing buckets mean no activity.
+          items:
+            oneOf:
+              - { $ref: '#/components/schemas/PricedBucket' }
+              - { $ref: '#/components/schemas/UnpricedBucket' }
+        breakdown:
+          type: object
+          additionalProperties: false
+          required: [items, nextCursor]
+          properties:
+            items:
+              type: array
+              description: Empty unless groupBy is set; stable sort is amount descending, currency, status, then key.
+              items:
+                oneOf:
+                  - { $ref: '#/components/schemas/PricedBreakdown' }
+                  - { $ref: '#/components/schemas/UnpricedBreakdown' }
+            nextCursor:
+              type: string
+              nullable: true
+              description: Opaque cursor for the next breakdown page; null when exhausted.
