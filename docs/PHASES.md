@@ -147,26 +147,30 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 
 ## Phase 5 — Dashboard MVP
 
-**Goal**: Frontend displays real spend data from Control Plane API.
+**Goal**: Frontend displays real spend data from the authenticated, currency-safe Control Plane API.
 
 **Dependencies**: Phase 4 (aggregation API)
 
 **Major Tasks**:
 - Frontend scaffold (React + TypeScript + Vite)
-- Control Plane API scaffold (Express/Fastify)
-- `/api/v1/analytics/spend` endpoint
+- Control Plane analytics API (`services/control-plane/`) exposes `GET /api/v2/analytics/spend` over Stage 4 active generations
+- Verify OIDC bearer tokens and authorize tenant scope from a configured claim
+- Preserve currency and priced/unpriced groups; serialize exact amount strings and provide bounded breakdown pagination
+- `/api/v2/analytics/spend` endpoint contract (`contracts/api/control-plane-api.v2.yaml`)
 - FinOps Dashboard page (total spend, daily trend, top workloads)
 - Spend Analysis page (breakdown by tenant/team/workload/provider/model)
 
-**Owner**: Om (M2) + Atharva (M3) for API
+**Owner**: Atharva (M3) for API; Om (M2) for Dashboard integration
 
 **Integration Points**:
-- Control Plane API → MongoDB aggregations
-- Contracts: `contracts/api/control-plane-api.yaml`
+- Dashboard → Control Plane API → MongoDB aggregations
+- Contracts: `contracts/api/control-plane-api.v2.yaml`; the USD-only v1 contract remains unchanged
 
 **Completion Criteria**:
 - Dashboard loads and shows real data
-- Spend breakdown filters work
+- Spend breakdown filters and pagination work
+- Unauthorized tenant filters are rejected before data access
+- Currencies and unpriced usage remain distinct
 - No hardcoded/mock data
 
 ---

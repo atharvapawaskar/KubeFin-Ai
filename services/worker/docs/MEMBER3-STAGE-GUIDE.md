@@ -110,21 +110,23 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **Why:** Rollups make spend analytics efficient while generation swaps keep readers on a complete snapshot during retries or rebuilds. Currency separation preserves monetary meaning.
 
-**Current implementation:** Stage 4 Worker code is prepared on the implementation branch. The current USD-only Control Plane API was left unchanged; exposing currency-separated rollups over HTTP requires a separately reviewed API contract.
+**Current implementation:** The Stage 4 contracts and Worker aggregation were merged in PRs #15 and #16. The current USD-only Control Plane API was left unchanged; exposing currency-separated rollups over HTTP required a separately reviewed API contract.
 
 **Verification:** TypeScript build and all 52 Worker tests passed with local loopback access; all 9 JSON contract schemas/examples validated; CLI syntax and `git diff --check` passed. Live MongoDB aggregation/concurrency and reconciliation could not be verified because MongoDB/Docker is unavailable in this environment.
 
 **Exit checks:** Review/merge the implementation; run against representative MongoDB data; reconcile event counts, token totals, and each currency independently; validate concurrent/repeated rebuilds and active-generation queries; agree an explicit retention policy before scheduling cleanup. A dashboard/API endpoint is a later stage with its own shared API contract.
 
-### Stage 5 — Control Plane API for analytics
+### Stage 5 — Control Plane API for analytics — CONTRACT MERGED, IMPLEMENTATION IN REVIEW
 
-**What we are doing:** Providing stable endpoints that expose spend and usage summaries to the dashboard.
+**What we are doing:** Providing an authenticated API that exposes currency-safe spend totals, time series, and optional breakdowns to the dashboard.
 
-**How:** Coordinate API schemas with Member 2, implement endpoints over the aggregation layer, validate filters and ranges, and add pagination/limits and safe error handling as specified by the API contract.
+**How:** The shared v2 API contract was reviewed and merged in PR #17. The new `services/control-plane/` service verifies OIDC bearer tokens against a configured HTTPS JWKS endpoint, derives tenant scope from a configured claim, and queries only the active Stage 4 aggregation generations. It validates half-open UTC ranges and supported filters, preserves currency and priced/unpriced groups, serializes exact decimal amounts, and provides bounded, signed breakdown pagination. It includes liveness/readiness routes, safe errors, redacted request logs, and a per-process concurrency cap. The existing v1 API remains unchanged.
 
 **Why:** The frontend should read governed API responses instead of accessing MongoDB directly.
 
-**Exit checks:** API responses match the contract, sampled totals reconcile with stored rollups, and query latency is measured against project goals.
+**Current implementation:** The API service, CI job, environment example, and docs are prepared for implementation review. Unit and injection tests cover query validation, currency separation, tenant isolation, JWT verification, signed cursors, readiness, and concurrency. Live MongoDB aggregations/index creation, deployed identity-provider configuration, dashboard integration, representative reconciliation, and latency measurements still need environment-backed verification.
+
+**Exit checks:** CI passes; API responses match the contract; token verification and tenant isolation are verified with the deployment's identity provider; sampled totals reconcile with active Stage 4 rollups; Member 2 integrates the endpoint; and query latency is measured against project goals.
 
 ### Stage 6 — Budget API and policy/budget integration
 
@@ -188,8 +190,8 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 ## 5. Immediate next actions
 
-1. Review and merge the Stage 4 Worker implementation.
-2. Run the aggregation CLI in dry-run mode, then apply only after source and range checks.
-3. Reconcile representative rollups with raw events and provider billing records per currency.
-4. Agree an explicit snapshot retention/cleanup policy before automating pruning.
-5. Coordinate a reviewed currency-aware analytics API contract with Member 2 before exposing these rollups to the dashboard.
+1. Review and merge the Stage 5 Control Plane API implementation.
+2. Configure real OIDC settings and verify tenant isolation with valid and invalid tokens.
+3. Run representative API ranges against MongoDB and reconcile each currency/status group with published Stage 4 rollups.
+4. Integrate the endpoint with Member 2's dashboard and measure query latency.
+5. Configure cluster-wide rate limiting at the ingress or API gateway; the service's concurrency cap is process-local.
