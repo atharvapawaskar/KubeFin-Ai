@@ -1,6 +1,6 @@
 # Kubefin Worker
 
-The Worker is the asynchronous control-plane service. It provides validated startup configuration, health/readiness routes, a separate Prometheus listener, graceful process shutdown, Redis Streams consumption, idempotent MongoDB persistence, and per-event token cost calculation. Stage 3 pricing contracts are proposed in the Stage 3 contract PR and must be reviewed before production pricing records are loaded.
+The Worker is the asynchronous control-plane service. It provides validated startup configuration, health/readiness routes, a separate Prometheus listener, graceful process shutdown, Redis Streams consumption, idempotent MongoDB persistence, per-event token cost calculation, and Stage 4 hourly/daily cost rollups. Stage 3 currency-aware pricing and Stage 4 aggregation contracts are merged; production prices must still be reviewed before loading.
 
 ## Current layout
 
@@ -12,6 +12,8 @@ services/worker/
 │   ├── main.ts      # dependency connections and process lifecycle
 │   ├── metrics.ts   # separate Prometheus listener
 │   ├── cost-engine.ts # exact token-cost calculation
+│   ├── cost-aggregation.ts # bounded UTC rollups and generation-safe reads/writes
+│   ├── cost-aggregation-cli.ts # strict rollup command argument validation
 │   ├── pricing-catalog.ts # effective-dated MongoDB pricing lookup
 │   ├── process-delivery.ts # validation/persist/DLQ/ack ordering
 │   ├── redis-stream-port.ts # Redis Streams adapter
@@ -19,6 +21,7 @@ services/worker/
 │   ├── usage-event.ts # v1 event validation and cost-enriched document mapping
 │   └── usage-event-store.ts # MongoDB idempotent persistence and pricing enrichment
 ├── test/            # Node test-runner tests
+├── scripts/aggregate-costs.mjs # dry-run-first hourly/daily rollup command
 ├── docs/
 │   ├── ASSUMPTIONS.md
 │   └── STATE.md
@@ -43,6 +46,20 @@ The current usage-event v1 contract supplies only input/output counts. Provider-
 Import reviewed pricing records from a JSON array matching `contracts/db/pricing.v2.json` with `MONGODB_URI` set. Run `npm run pricing:import -- --file ./pricing.json` to validate and preview a dry run. Add `--apply` only to insert records. Existing records are immutable; the importer rejects changed IDs and overlapping intervals in the same currency, and never deletes rates. The Worker and importer create a partial v2 index; they never remove the legacy index automatically. Review the migration, then run `npm run pricing:migrate-index -- --apply` to add the currency/version-aware unique index and remove the old stricter index. This operation changes indexes only, not pricing documents. Backfill with `PRICING_CURRENCY` set to the target currency; old USD cost fields are removed only when a matching v2 rate is available.
 
 After rates are loaded, `npm run pricing:backfill -- --batch-size 100` scans legacy Stage 2 events and previously unpriced events in bounded batches. It defaults to a dry run; add `--apply` to add cost metadata to eligible documents. It does not change usage fields or remove pricing records.
+
+## Stage 4 cost aggregation
+
+The Stage 4 contracts in `contracts/db/cost-aggregations.v1.json` and `contracts/db/cost-aggregation-windows.v1.json` define currency-separated hourly/daily snapshots and their publication state. Windows are UTC and end-exclusive. Events without pricing remain visible with a null currency and token/event counts, with no cost amount. The rollup refuses malformed source records rather than silently omitting them.
+
+Run a dry run from an hour-aligned range (end exclusive):
+
+```sh
+npm run costs:aggregate -- --granularity hour --from 2026-10-17T05:00:00Z --to 2026-10-17T08:00:00Z
+```
+
+The command accepts at most 744 hourly windows or 366 daily windows per run. Add `--apply` to connect to MongoDB and publish the rollups. Rebuilds write a new generation and atomically switch each window's active generation only after aggregation succeeds. Readers must filter by the `activeGeneration` stored in `cost_aggregation_windows`; incomplete generations are not visible. The `MongoCostAggregationStore.queryActiveRange` read helper returns currency and pricing-status rows separately and never combines currencies. It is intended for the Control Plane integration; this change does not add an unauthenticated HTTP endpoint or alter the shared USD-only API contract.
+
+No TTL policy is created. Decide and approve retention before removing raw events or aggregate snapshots. Validate the first applied runs against known source-event totals in a MongoDB environment before scheduling them in production.
 
 ## Local development
 
