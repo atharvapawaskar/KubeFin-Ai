@@ -14,7 +14,10 @@ contracts/
 ├── db/           # MongoDB collection schemas (JSON Schema)
 │   ├── usage-events.json
 │   ├── cost-aggregations.json
-│   ├── pricing.v1.json
+│   ├── pricing.v1.json             # Legacy USD pricing contract
+│   ├── pricing.v2.json             # Currency-aware pricing contract
+│   ├── usage-events.v1.json        # Legacy USD-enriched event document
+│   ├── usage-events.v2.json        # Currency-aware event document
 │   ├── policies.json
 │   ├── budgets.json
 │   ├── recommendations.json
@@ -49,6 +52,8 @@ contracts/
 - **Deprecation** — Support old version during migration, document timeline
 
 Phase 3 pricing records use exact provider/model keys and effective intervals. Store source URL and verification timestamp with each rate. The Worker consumes reviewed rates; the contract does not publish or seed provider prices.
+
+Pricing v2 supports ISO 4217 currency codes and identifies its records with `pricingVersion: 2`. Each Worker deployment selects one pricing currency with `PRICING_CURRENCY` (default `INR`); a rate must exist in that currency for the exact provider/model and event time. Costs are stored as `costAmount` plus `costCurrency`. No exchange-rate conversion is implied; rates sourced in another currency need a separately reviewed FX source and policy. Since v2 changes the persisted pricing shape, v1 schemas remain available for legacy data and v2 uses new schema filenames.
 
 ## Breaking Changes
 
