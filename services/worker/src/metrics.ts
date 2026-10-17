@@ -1,10 +1,19 @@
 import { createServer, type Server } from 'node:http';
-import { collectDefaultMetrics, Registry } from '@prometheus-io/client';
+import { collectDefaultMetrics, Counter, Registry } from '@prometheus-io/client';
 
 export function createMetricsRegistry(): Registry {
   const registry = new Registry();
   collectDefaultMetrics({ register: registry });
   return registry;
+}
+
+export function createUsageEventCounter(registry: Registry): Counter<'outcome'> {
+  return new Counter({
+    name: 'worker_usage_events_total',
+    help: 'Usage event delivery outcomes processed by the Worker.',
+    labelNames: ['outcome'],
+    registers: [registry],
+  });
 }
 
 export function createMetricsServer(registry: Registry): Server {

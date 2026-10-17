@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { processDelivery } from '../src/events/process-delivery.js';
+import { processDelivery } from '../src/process-delivery.js';
 
 test('persists a valid delivery before acknowledging it', async () => {
   const calls: string[] = [];

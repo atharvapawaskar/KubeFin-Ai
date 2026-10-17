@@ -11,6 +11,10 @@ test('uses the agreed service and metrics ports when not overridden', () => {
   const config = parseConfig(validEnvironment);
   assert.equal(config.PORT, 3000);
   assert.equal(config.METRICS_PORT, 9090);
+  assert.equal(config.REDIS_USAGE_STREAM, 'usage-events');
+  assert.equal(config.REDIS_USAGE_GROUP, 'kubefin-worker-v1');
+  assert.equal(config.WORKER_BATCH_SIZE, 10);
+  assert.equal(config.WORKER_MAX_DELIVERIES, 5);
 });
 
 test('rejects equal service and metrics ports', () => {
@@ -27,4 +31,11 @@ test('accepts TLS Redis and MongoDB SRV connection URLs', () => {
     REDIS_URL: 'rediss://redis.example:6380',
   });
   assert.equal(config.REDIS_URL, 'rediss://redis.example:6380');
+});
+
+test('rejects out-of-range stream consumer limits', () => {
+  assert.throws(() => parseConfig({ ...validEnvironment, WORKER_BATCH_SIZE: '101' }));
+  assert.throws(() => parseConfig({ ...validEnvironment, WORKER_MAX_DELIVERIES: '0' }));
+  assert.throws(() => parseConfig({ ...validEnvironment, WORKER_MAX_EVENT_BYTES: '900' }));
+  assert.throws(() => parseConfig({ ...validEnvironment, WORKER_MAX_EVENT_BYTES: '262145' }));
 });

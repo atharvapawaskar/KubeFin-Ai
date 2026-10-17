@@ -1,6 +1,6 @@
 # Kubefin Worker
 
-The Worker is the asynchronous control-plane service. Its first slice provides validated startup configuration, health/readiness routes, a separate Prometheus listener, and graceful process shutdown. Event consumption and persistence will be added only against the approved contracts.
+The Worker is the asynchronous control-plane service. It provides validated startup configuration, health/readiness routes, a separate Prometheus listener, graceful process shutdown, and a Stage 2 Redis Streams consumer. The event, database, and Redis contract files in the current working tree are proposals awaiting project review; they must be approved before Gateway integration.
 
 ## Current layout
 
@@ -10,7 +10,12 @@ services/worker/
 │   ├── app.ts       # liveness and readiness routes
 │   ├── config.ts    # startup environment validation
 │   ├── main.ts      # dependency connections and process lifecycle
-│   └── metrics.ts   # separate Prometheus listener
+│   ├── metrics.ts   # separate Prometheus listener
+│   ├── process-delivery.ts # validation/persist/DLQ/ack ordering
+│   ├── redis-stream-port.ts # Redis Streams adapter
+│   ├── stream-consumer.ts # group polling, recovery, and delivery policy
+│   ├── usage-event.ts # v1 event validation and raw document mapping
+│   └── usage-event-store.ts # MongoDB idempotent persistence
 ├── test/            # Node test-runner tests
 ├── docs/
 │   ├── ASSUMPTIONS.md
@@ -25,7 +30,9 @@ services/worker/
 
 Required: `MONGODB_URI`, `REDIS_URL`.
 
-Optional: `NODE_ENV` (defaults to `development`), `PORT` (defaults to `3000`), and `METRICS_PORT` (defaults to `9090`). `PORT` and `METRICS_PORT` must differ. The metrics listener serves only `GET /metrics`; the health listener serves `/healthz` and `/readyz`.
+Optional: `NODE_ENV` (defaults to `development`), `PORT` (defaults to `3000`), `METRICS_PORT` (defaults to `9090`), `REDIS_USAGE_STREAM` (`usage-events`), `REDIS_USAGE_GROUP` (`kubefin-worker-v1`), `WORKER_BATCH_SIZE` (`10`), `WORKER_BLOCK_MS` (`5000`), `WORKER_CLAIM_IDLE_MS` (`30000`), `WORKER_MAX_DELIVERIES` (`5`), and `WORKER_MAX_EVENT_BYTES` (`262144`). Bounds are validated at startup. `PORT` and `METRICS_PORT` must differ. The metrics listener serves only `GET /metrics`; the health listener serves `/healthz` and `/readyz`.
+
+The Worker creates its Redis consumer group at stream ID `0`, reclaims idle pending entries with `XAUTOCLAIM`, validates each JSON payload against `contracts/events/usage-event.v1.json`, and stores accepted raw events in MongoDB with `eventId` as `_id`. Invalid payloads are represented in `usage-events:dlq` by a digest and size only; valid events that exhaust persistence retries retain their bounded event body for replay. The DLQ write and source acknowledgement are atomic. Stream trimming is intentionally disabled in the proposal so Redis cannot discard unprocessed events.
 
 ## Local development
 

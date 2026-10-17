@@ -88,7 +88,7 @@ Return Response to Application
 Gateway
     │
     ▼ (emit)
-Redis Streams: usage-events (partitioned by tenantId)
+Redis Streams: usage-events (single MVP stream; partitioning is deferred)
     │
     ▼ (consume)
 Worker: Event Processor
@@ -103,7 +103,7 @@ Worker: Aggregation Engine
     │   - Hourly/daily rollups by tenant, team, workload, provider, model
     ▼
 MongoDB: Collections
-    │   - usage_events (raw, time-series)
+    │   - usage_events (raw, regular collection with unique eventId _id)
     │   - cost_aggregations (rollups)
     │   - pricing (provider/model tables)
     ▼
@@ -135,16 +135,16 @@ Frontend Dashboard visualizes data
 | `cost-engine/` | Calculate token + infra cost |
 | `aggregation-engine/` | Hourly/daily rollups |
 
-**Non-functional**: Event lag < 30s, exactly-once semantics
+**Non-functional**: Event lag < 30s, at-least-once Redis delivery with idempotent raw-event persistence
 
 ### Frontend (`frontend/`) — Owner: Om (M2)
 React + TypeScript dashboard consuming Control Plane API. Pages: FinOps overview, Spend Analysis, Workload Insights, Budget Management, Optimization.
 
 ### MongoDB
-Time-series collections: `usage_events`, `cost_aggregations`, `pricing`, `policies`, `budgets`, `audit_logs`
+The Stage 2 proposal stores `usage_events` in a regular collection with event ID as the unique `_id` so redelivery is idempotent. Time-series collections may be used for `cost_aggregations` and other data where the schema supports them. This raw-event collection choice is pending contract review.
 
 ### Redis
-- Redis Streams: `usage-events` (partitioned by tenantId)
+- Redis Streams: `usage-events` (single-stream MVP proposal; the Worker uses the `kubefin-worker-v1` consumer group and `usage-events:dlq`)
 - Rate limiting counters
 - Budget counters
 - Caching (future)
@@ -181,8 +181,8 @@ Pluggable adapters for OpenAI, Anthropic, Ollama (vLLM/TGI future)
 
 - **Gateway**: Circuit breaker per provider, exponential backoff, fallback to secondary provider
 - **Worker**: Dead letter queue for failed events, retry with backoff, idempotent processing
-- **MongoDB**: Replica set, time-series collections with TTL
-- **Redis**: Redis Streams consumer groups for exactly-once, persistence enabled
+- **MongoDB**: Replica set; raw events use an idempotency key, and retention/TTL follows the approved collection contract
+- **Redis**: Redis Streams consumer groups provide at-least-once delivery; idempotent writes and pending-entry recovery handle redelivery
 
 ## I. Security Principles
 
