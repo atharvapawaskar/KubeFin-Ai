@@ -13,12 +13,19 @@ test('uses the agreed service and metrics ports when not overridden', () => {
   assert.equal(config.METRICS_PORT, 9090);
   assert.equal(config.REDIS_USAGE_STREAM, 'usage-events');
   assert.equal(config.REDIS_USAGE_GROUP, 'kubefin-worker-v1');
+  assert.equal(config.PRICING_CURRENCY, 'INR');
   assert.equal(config.WORKER_BATCH_SIZE, 10);
   assert.equal(config.WORKER_MAX_DELIVERIES, 5);
 });
 
 test('rejects equal service and metrics ports', () => {
   assert.throws(() => parseConfig({ ...validEnvironment, PORT: '9090' }));
+});
+
+test('allows an explicitly selected ISO currency and rejects malformed currency codes', () => {
+  assert.equal(parseConfig({ ...validEnvironment, PRICING_CURRENCY: 'USD' }).PRICING_CURRENCY, 'USD');
+  assert.throws(() => parseConfig({ ...validEnvironment, PRICING_CURRENCY: 'inr' }));
+  assert.throws(() => parseConfig({ ...validEnvironment, PRICING_CURRENCY: 'IN' }));
 });
 
 test('rejects missing connection strings and invalid URL schemes', () => {

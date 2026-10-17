@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   });
   redis.on('error', () => app.log.warn('Redis connection error'));
   const stream = new RedisUsageStreamPort(redis, `${config.REDIS_USAGE_STREAM}:dlq`);
-  const pricingCatalog = new MongoPricingCatalog(mongo.db().collection('pricing'));
+  const pricingCatalog = new MongoPricingCatalog(mongo.db().collection('pricing'), config.PRICING_CURRENCY);
   const eventStore = new MongoUsageEventStore(
     mongo.db().collection<UsageEventDocument>('usage_events'),
     pricingCatalog,

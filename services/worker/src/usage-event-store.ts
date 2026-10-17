@@ -1,5 +1,5 @@
 import { MongoServerError, type Collection, type Filter } from 'mongodb';
-import { calculateCostUsd } from './cost-engine.js';
+import { calculateCostAmount } from './cost-engine.js';
 import type { PricingCatalog } from './pricing-catalog.js';
 import type { UsageEvent } from './usage-event.js';
 import { toUsageEventDocument, type UsageEventDocument } from './usage-event.js';
@@ -27,7 +27,9 @@ export class MongoUsageEventStore implements UsageEventStore {
     }
 
     const rate = await this.pricingCatalog.findApplicableRate(event);
-    const pricing = rate ? { recordId: rate._id, costUsd: calculateCostUsd(event, rate) } : undefined;
+    const pricing = rate
+      ? { recordId: rate._id, amount: calculateCostAmount(event, rate), currency: rate.currency }
+      : undefined;
 
     if (existing) {
       if (existing.pricingStatus === 'unpriced' && !pricing) return 'duplicate';
@@ -39,9 +41,9 @@ export class MongoUsageEventStore implements UsageEventStore {
         {
           $set: {
             pricingStatus: pricing ? 'priced' : 'unpriced',
-            ...(pricing ? { cost_usd: pricing.costUsd, pricingRecordId: pricing.recordId } : {}),
+            ...(pricing ? { costAmount: pricing.amount, costCurrency: pricing.currency, pricingRecordId: pricing.recordId } : {}),
           },
-          ...(!pricing ? { $unset: { cost_usd: '', pricingRecordId: '' } } : {}),
+          ...(!pricing ? { $unset: { costAmount: '', costCurrency: '', pricingRecordId: '' } } : {}),
         },
       );
       return update.matchedCount > 0 ? (pricing ? 'inserted' : 'unpriced') : 'duplicate';

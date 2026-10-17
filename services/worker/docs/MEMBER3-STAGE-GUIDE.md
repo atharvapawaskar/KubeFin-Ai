@@ -1,6 +1,6 @@
 # Member 3 (Atharva) — Stage-by-Stage Guide
 
-This guide scopes the KubeFin AI roadmap to Member 3's Worker and DevOps responsibilities. It distinguishes checked-in configuration from future architecture plans. Shared contracts are owned by all members and must be agreed before implementing cross-service behavior.
+This guide scopes the KubeFin AI roadmap to Member 3's Worker and DevOps responsibilities. It distinguishes checked-in configuration from future architecture plans. Shared contracts are owned by all members; the Stage 3 currency v2 proposal is PR #11, and this implementation is being developed on a dependent branch against that proposal.
 
 ## 1. Project context
 
@@ -34,10 +34,10 @@ Compose does **not** currently build or run the Worker, Gateway, API, frontend, 
 - Optional environment: `NODE_ENV` (defaults to `development`), `PORT` (defaults to `3000`), `METRICS_PORT` (defaults to `9090`). The Worker rejects equal app and metrics ports.
 - The Worker binds both listeners to `0.0.0.0`; this is recorded as assumption A-001 in `ASSUMPTIONS.md` and remains pending confirmation.
 - `GET /healthz` is liveness. `GET /readyz` pings MongoDB and Redis and returns 503 if they are unavailable.
-- A separate metrics listener serves only `GET /metrics` and currently collects default process/runtime metrics. Worker-specific event counters, lag, and processing-duration metrics have not been added.
-- Redis reconnect handling and graceful SIGTERM/SIGINT shutdown are implemented. Event consumers and persistence are not yet implemented.
+- A separate metrics listener serves only `GET /metrics`, collects default process/runtime metrics, and exposes a bounded-cardinality usage-event outcome counter. Event lag and processing-duration metrics have not been added.
+- Redis reconnect handling, graceful SIGTERM/SIGINT shutdown, the Stage 2 Redis Streams consumer, validation, idempotent MongoDB persistence, retries, and DLQ handling are implemented and merged.
 
-The root `.env.example` has MongoDB/Redis URLs, a generic `PORT=3000`, `NODE_ENV`, optional provider-key placeholders, and feature flags. It does not list `METRICS_PORT`; add Worker-specific variables there when the team agrees on how shared local configuration should be maintained. Do not put secrets in the repository.
+The root `.env.example` includes MongoDB/Redis URLs, Worker stream settings, `PRICING_CURRENCY=INR`, a generic `PORT=3000`, `NODE_ENV`, optional provider-key placeholders, and feature flags. Do not put secrets in the repository.
 
 ### Kubernetes, Helm, Prometheus, and other observability
 
@@ -49,10 +49,10 @@ The root `.env.example` has MongoDB/Redis URLs, a generic `PORT=3000`, `NODE_ENV
 
 ### CI, contracts, and collaboration
 
-- `.github/workflows/ci.yml` currently checks required files/directories and a few repository rules. Contract validation is a placeholder; service validation only reports whether package files exist. It does not yet run the Worker build or test suite.
+- `.github/workflows/ci.yml` checks repository structure, validates JSON contracts, and builds/tests the Worker.
 - `.github/CODEOWNERS` assigns Worker and deploy paths to Member 3. Shared contracts and architecture documentation involve all three members.
-- Contract workflow in `contracts/README.md` requires a contract-only PR and approvals from the other members before implementation depends on it.
-- Current contract files include the Control Plane API and database schemas for budgets and recommendations. `contracts/events/` and `contracts/redis/` contain no contracts; `contracts/db/` has no raw usage-event or cost-aggregation schema.
+- Contract workflow in `contracts/README.md` requires a contract-only PR. Stage 2 event, raw-event, and Redis contracts are merged; the Stage 3 currency-aware v2 proposal is open as PR #11. The owner authorized preparing the dependent implementation while the proposal is under review.
+- Current contracts include the Control Plane API, budgets, recommendations, Stage 2 usage-event and Redis definitions, and Stage 3 pricing v1. Cost aggregation is a later phase.
 - `CONTRIBUTING.md` calls for short-lived branches from `main`, focused PRs, passing CI, and documentation updates for behavior or architecture changes.
 
 ## 3. Member 3 stage plan
@@ -94,11 +94,13 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **What we are doing:** Calculating per-event AI cost from provider/model usage and versioned pricing data.
 
-**How:** Propose a versioned MongoDB pricing contract with exact provider/model matching, effective time intervals, USD rates, and an official source URL/verification timestamp. Store rates as integer micro-USD per million tokens. Calculate with integer arithmetic and store `cost_usd` as Decimal128 with sub-micro-dollar precision so aggregation does not round each event. Persist events without a matching rate as `unpriced`; never substitute zero or a guessed price. Populate production rates only from provider-published pricing and verify representative invoices.
+**How:** Use a versioned MongoDB pricing contract with exact provider/model/currency matching and effective intervals. The currency-aware v2 contract accepts ISO 4217 codes; `PRICING_CURRENCY` chooses the Worker deployment currency (default INR). Store rate integers as micro-units of that currency per million tokens. Calculate with integer arithmetic and store `costAmount` as Decimal128 with `costCurrency`. There is no automatic FX conversion; downstream aggregation must group by currency or apply a separately reviewed conversion policy. Persist events without a matching rate as `unpriced`; never substitute zero or a guessed price.
+
+**Current implementation:** Prepared on `m3/stage3-currency-implementation`, based on the PR #11 contract proposal branch. Build and 40 Worker tests pass; all 7 contract schemas/examples validate. Live Redis/Mongo integration, reviewed rate provisioning, migration execution, and provider billing reconciliation remain outstanding.
 
 **Why:** Usage counts are not spend until pricing rules are applied consistently and explainably.
 
-**Exit checks:** The contract is approved by both other members; unit/reference calculation cases pass; rate intervals cannot overlap; costs identify their pricing record; unmatched records remain visible as unpriced; live Redis/Mongo integration and provider billing reconciliation are verified after rates are populated.
+**Exit checks:** The contract is approved by both other members; unit/reference calculation cases pass; rate intervals cannot overlap within a provider/model/currency; costs identify their pricing record and currency; unmatched records remain visible as unpriced; live Redis/Mongo integration and provider billing reconciliation are verified after rates are populated.
 
 ### Stage 4 — MongoDB persistence and aggregation
 
@@ -174,7 +176,7 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 1. Check the current `main`, repository instructions, and relevant contracts before coding.
 2. List the stage's inputs, owners, decisions, and exit checks in `STATE.md`.
-3. Resolve shared interface decisions through the contract workflow before implementing cross-service behavior.
+3. Resolve shared interface decisions through the contract workflow before merging cross-service behavior. Owner-authorized preparation may proceed on a dependent branch against a clearly identified proposal.
 4. Make one focused change on a short-lived Member 3 branch, limited to Worker, deploy, and any specifically assigned CI paths.
 5. Add/update verification appropriate to the change; run the documented build and checks when implementation is ready.
 6. Update the README/state/docs affected by the change, open a focused PR, and record integration dependencies.
@@ -182,8 +184,8 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 ## 5. Immediate next actions
 
-1. Review the Phase 3 pricing contract proposal with Vedant (M1) and Om (M2), as both are required contract reviewers.
-2. Provision reviewed effective-dated rates from official provider sources into MongoDB's `pricing` collection.
-3. Run worker tests and contract validation, then verify rate lookup, cost persistence, and unknown-rate behavior against live MongoDB/Redis.
-4. Compare representative calculated costs with provider invoices before treating spend totals as production-accurate.
-5. After Phase 3 review and integration gates pass, proceed to Phase 4 cost aggregation.
+1. Submit the currency-aware pricing v2 and usage-events v2 contract proposal to Vedant (M1) and Om (M2) for review.
+2. Review the legacy pricing index and data; then use the dry-run-first `pricing:migrate-index` command to replace the stricter index. The Worker never drops it automatically.
+3. Provision reviewed effective-dated rates in the configured currency.
+4. Run Worker tests and contract validation, then verify rate lookup, cost persistence, and unknown-rate behavior against live MongoDB/Redis.
+5. Compare representative calculated costs with provider invoices. Before Phase 4, agree to group by currency or define a reviewed FX policy.

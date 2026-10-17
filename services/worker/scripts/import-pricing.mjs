@@ -30,10 +30,10 @@ function timeRangeOverlaps(a, b) {
 
 function sameRate(a, b) {
   const date = (value) => value instanceof Date ? value.toISOString() : value;
-  return a._id === b._id &&
+  return a._id === b._id && a.pricingVersion === b.pricingVersion &&
     a.provider === b.provider && a.model === b.model && a.currency === b.currency &&
-    a.inputRateMicroUsdPerMillionTokens === b.inputRateMicroUsdPerMillionTokens &&
-    a.outputRateMicroUsdPerMillionTokens === b.outputRateMicroUsdPerMillionTokens &&
+    a.inputRateMicrosPerMillionTokens === b.inputRateMicrosPerMillionTokens &&
+    a.outputRateMicrosPerMillionTokens === b.outputRateMicrosPerMillionTokens &&
     date(a.effectiveFrom) === date(b.effectiveFrom) &&
     date(a.effectiveTo) === date(b.effectiveTo) &&
     a.sourceUrl === b.sourceUrl && date(a.sourceVerifiedAt) === date(b.sourceVerifiedAt);
@@ -47,7 +47,7 @@ async function main() {
 
   const [raw, rawSchema] = await Promise.all([
     readFile(file, 'utf8'),
-    readFile(new URL('../../contracts/db/pricing.v1.json', import.meta.url), 'utf8'),
+    readFile(new URL('../../contracts/db/pricing.v2.json', import.meta.url), 'utf8'),
   ]);
   const records = JSON.parse(raw);
   if (!Array.isArray(records) || records.length === 0) return fail('Pricing file must contain a non-empty JSON array.');
@@ -58,6 +58,9 @@ async function main() {
   for (const [index, record] of records.entries()) {
     if (!validate(record)) {
       return fail(`Pricing record ${index + 1} is invalid: ${ajv.errorsText(validate.errors)}`);
+    }
+    if (!Intl.supportedValuesOf('currency').includes(record.currency)) {
+      return fail(`Pricing record ${index + 1} has an unsupported ISO 4217 currency code.`);
     }
   }
 
@@ -73,6 +76,7 @@ async function main() {
   for (let i = 0; i < proposed.length; i += 1) {
     for (let j = i + 1; j < proposed.length; j += 1) {
       if (proposed[i].provider === proposed[j].provider && proposed[i].model === proposed[j].model &&
+          proposed[i].currency === proposed[j].currency &&
           timeRangeOverlaps(proposed[i], proposed[j])) {
         return fail(`Pricing records ${proposed[i]._id} and ${proposed[j]._id} have overlapping intervals.`);
       }
@@ -84,19 +88,28 @@ async function main() {
     await client.connect();
     const collection = client.db().collection('pricing');
     await collection.createIndex(
-      { provider: 1, model: 1, effectiveFrom: 1 },
-      { unique: true, name: 'pricing_provider_model_effective_from_unique' },
+      { provider: 1, model: 1, currency: 1, pricingVersion: 1, effectiveFrom: 1 },
+      {
+        unique: true,
+        name: 'pricing_provider_model_currency_version_effective_from_unique_v2',
+        partialFilterExpression: { pricingVersion: 2 },
+      },
     );
 
     const insert = [];
     for (const record of proposed) {
-      const existing = await collection.find({ provider: record.provider, model: record.model }).toArray();
+      const existing = await collection.find({
+        pricingVersion: 2,
+        provider: record.provider,
+        model: record.model,
+        currency: record.currency,
+      }).toArray();
       const byId = existing.find((item) => item._id === record._id);
       if (byId) {
         if (!sameRate(byId, record)) return fail(`Pricing record ${record._id} already exists with different values; rate records are immutable.`);
         continue;
       }
-      if (existing.some((item) => timeRangeOverlaps(record, item))) {
+      if (existing.some((item) => item.currency === record.currency && timeRangeOverlaps(record, item))) {
         return fail(`Pricing record ${record._id} overlaps an existing effective interval.`);
       }
       insert.push(record);

@@ -4,8 +4,8 @@ import type { Collection } from 'mongodb';
 import { MongoPricingCatalog, type PricingRate } from '../src/pricing-catalog.js';
 
 const rate: PricingRate = {
-  _id: 'rate-1', provider: 'openai', model: 'example-model', currency: 'USD',
-  inputRateMicroUsdPerMillionTokens: 1_000_000, outputRateMicroUsdPerMillionTokens: 2_000_000,
+  _id: 'rate-1', pricingVersion: 2, provider: 'openai', model: 'example-model', currency: 'INR',
+  inputRateMicrosPerMillionTokens: 1_000_000, outputRateMicrosPerMillionTokens: 2_000_000,
   effectiveFrom: new Date('2026-01-01T00:00:00Z'), sourceUrl: 'https://example.invalid/pricing',
   sourceVerifiedAt: new Date('2026-01-01T00:00:00Z'),
 };
@@ -25,27 +25,33 @@ test('looks up a provider/model rate applicable at event time', async () => {
     toArray: async () => [rate],
   };
   const collection = { find: (filter: Record<string, unknown>) => { query = filter; return cursor; } } as unknown as Collection<PricingRate>;
-  const catalog = new MongoPricingCatalog(collection);
+  const catalog = new MongoPricingCatalog(collection, 'INR');
   assert.equal((await catalog.findApplicableRate(event('2026-10-17T05:00:00Z')))?._id, rate._id);
   assert.equal(query?.provider, 'openai');
   assert.equal(query?.model, 'example-model');
+  assert.equal(query?.currency, 'INR');
+  assert.equal(query?.pricingVersion, 2);
   assert.deepEqual(query?.effectiveFrom, { $lte: new Date('2026-10-17T05:00:00Z') });
 });
 
 test('rejects overlapping active rates instead of choosing an arbitrary price', async () => {
   const cursor = { sort: () => cursor, limit: () => cursor, toArray: async () => [rate, { ...rate, _id: 'rate-2' }] };
   const collection = { find: () => cursor } as unknown as Collection<PricingRate>;
-  const catalog = new MongoPricingCatalog(collection);
-  await assert.rejects(catalog.findApplicableRate(event('2026-10-17T05:00:00Z')), /intervals overlap/);
+  const catalog = new MongoPricingCatalog(collection, 'INR');
+  await assert.rejects(catalog.findApplicableRate(event('2026-10-17T05:00:00Z')), /provider, model, and currency/);
 });
 
-test('creates a unique provider/model/effective-from index', async () => {
+test('creates a unique provider/model/currency/effective-from index', async () => {
   let captured: unknown;
   const collection = { createIndex: async (keys: unknown, options: unknown) => { captured = { keys, options }; return 'index'; } } as unknown as Collection<PricingRate>;
-  const catalog = new MongoPricingCatalog(collection);
+  const catalog = new MongoPricingCatalog(collection, 'INR');
   await catalog.ensureIndexes();
   assert.deepEqual(captured, {
-    keys: { provider: 1, model: 1, effectiveFrom: 1 },
-    options: { unique: true, name: 'pricing_provider_model_effective_from_unique' },
+    keys: { provider: 1, model: 1, currency: 1, pricingVersion: 1, effectiveFrom: 1 },
+    options: {
+      unique: true,
+      name: 'pricing_provider_model_currency_version_effective_from_unique_v2',
+      partialFilterExpression: { pricingVersion: 2 },
+    },
   });
 });
