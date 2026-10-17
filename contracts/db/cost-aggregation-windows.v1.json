@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/db/cost-aggregation-windows.v1.json",
+  "title": "cost_aggregation_windows v1 (MongoDB collection)",
+  "description": "Publication and lease state for atomic visibility of rebuildable cost aggregation snapshots. A reader MUST select only documents whose generation matches activeGeneration for this granularity and window. leaseFence is incremented on each lease acquisition so an expired job cannot publish over a newer owner. No retention policy is implied.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_id", "schemaVersion", "granularity", "windowStart", "windowEnd", "activeGeneration", "leaseFence", "updatedAt"],
+  "properties": {
+    "_id": { "type": "string", "pattern": "^(hour|day):\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" },
+    "schemaVersion": { "const": 1 },
+    "granularity": { "type": "string", "enum": ["hour", "day"] },
+    "windowStart": { "type": "string", "format": "date-time" },
+    "windowEnd": { "type": "string", "format": "date-time" },
+    "activeGeneration": { "oneOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
+    "leaseOwner": { "type": ["string", "null"], "format": "uuid" },
+    "leaseExpiresAt": { "type": ["string", "null"], "format": "date-time" },
+    "leaseFence": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "examples": [
+    {
+      "_id": "hour:2026-10-17T05:00:00.000Z",
+      "schemaVersion": 1,
+      "granularity": "hour",
+      "windowStart": "2026-10-17T05:00:00Z",
+      "windowEnd": "2026-10-17T06:00:00Z",
+      "activeGeneration": "c470e9f5-9d7f-4aa6-a12f-d88cc47102f3",
+      "leaseOwner": null,
+      "leaseExpiresAt": null,
+      "leaseFence": 3,
+      "updatedAt": "2026-10-17T06:05:00Z"
+    }
+  ],
+  "invalidExamples": [
+    {
+      "_id": "hour:2026-10-17T05:00:00.000Z",
+      "schemaVersion": 1,
+      "granularity": "hour",
+      "windowStart": "2026-10-17T05:00:00Z",
+      "windowEnd": "2026-10-17T06:00:00Z",
+      "activeGeneration": null,
+      "leaseOwner": null,
+      "leaseExpiresAt": null,
+      "leaseFence": -1,
+      "updatedAt": "2026-10-17T06:05:00Z"
+    }
+  ]
+}
