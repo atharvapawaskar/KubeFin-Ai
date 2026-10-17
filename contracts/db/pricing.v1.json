@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/db/pricing.v1.json",
+  "title": "pricing (MongoDB collection)",
+  "description": "Versioned USD token rates curated from provider-published pricing. Rates are expressed as integer micro-USD per one million tokens so lookup and cost calculations avoid binary floating-point arithmetic. effectiveTo is exclusive; rate intervals for one provider/model must not overlap.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_id", "provider", "model", "currency", "inputRateMicroUsdPerMillionTokens", "outputRateMicroUsdPerMillionTokens", "effectiveFrom", "sourceUrl", "sourceVerifiedAt"],
+  "properties": {
+    "_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "model": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "currency": { "const": "USD" },
+    "inputRateMicroUsdPerMillionTokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "outputRateMicroUsdPerMillionTokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "effectiveFrom": { "type": "string", "format": "date-time" },
+    "effectiveTo": { "type": "string", "format": "date-time" },
+    "sourceUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "sourceVerifiedAt": { "type": "string", "format": "date-time" }
+  },
+  "examples": [
+    {
+      "_id": "example-provider-example-model-2026-01",
+      "provider": "example-provider",
+      "model": "example-model",
+      "currency": "USD",
+      "inputRateMicroUsdPerMillionTokens": 1000000,
+      "outputRateMicroUsdPerMillionTokens": 2000000,
+      "effectiveFrom": "2026-01-01T00:00:00Z",
+      "sourceUrl": "https://example.invalid/pricing",
+      "sourceVerifiedAt": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "invalidExamples": [
+    {
+      "_id": "invalid-rate",
+      "provider": "example-provider",
+      "model": "example-model",
+      "currency": "USD",
+      "inputRateMicroUsdPerMillionTokens": -1,
+      "outputRateMicroUsdPerMillionTokens": 2000000,
+      "effectiveFrom": "2026-01-01T00:00:00Z",
+      "sourceUrl": "http://example.invalid/pricing",
+      "sourceVerifiedAt": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

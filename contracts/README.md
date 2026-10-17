@@ -14,7 +14,7 @@ contracts/
 ├── db/           # MongoDB collection schemas (JSON Schema)
 │   ├── usage-events.json
 │   ├── cost-aggregations.json
-│   ├── pricing.json
+│   ├── pricing.v1.json
 │   ├── policies.json
 │   ├── budgets.json
 │   ├── recommendations.json
@@ -47,6 +47,8 @@ contracts/
 - **Breaking changes** → New version (`v2`, `v3`...)
 - **Non-breaking** (optional fields) → Same version
 - **Deprecation** — Support old version during migration, document timeline
+
+Phase 3 pricing records use exact provider/model keys and effective intervals. Store source URL and verification timestamp with each rate. The Worker consumes reviewed rates; the contract does not publish or seed provider prices.
 
 ## Breaking Changes
 

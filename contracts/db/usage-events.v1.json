@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://kubefin.local/contracts/db/usage-events.v1.json",
   "title": "usage_events (MongoDB collection)",
-  "description": "Proposed regular MongoDB collection. The eventId value is stored as _id so MongoDB's built-in unique _id index provides idempotent inserts. A regular collection is used because MongoDB time-series collections do not support the required unique event-id index.",
+  "description": "Proposed regular MongoDB collection. The eventId value is stored as _id so MongoDB's built-in unique _id index provides idempotent inserts. A regular collection is used because MongoDB time-series collections do not support the required unique event-id index. Phase 3 adds optional cost and pricing metadata; events without an effective catalog rate remain durably stored as unpriced.",
   "type": "object",
   "additionalProperties": false,
   "required": ["_id", "schemaVersion", "occurredAt", "receivedAt", "tenantId", "provider", "model", "usage"],
@@ -22,11 +22,24 @@
       "additionalProperties": false,
       "required": ["inputTokens", "outputTokens"],
       "properties": {
-        "inputTokens": { "type": "integer", "minimum": 0 },
-        "outputTokens": { "type": "integer", "minimum": 0 }
+        "inputTokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "outputTokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
       }
-    }
+    },
+    "pricingStatus": { "type": "string", "enum": ["priced", "unpriced"] },
+    "cost_usd": { "type": "number", "minimum": 0, "description": "Exact cost in USD from the configured micro-USD-per-million rates, represented with up to 12 decimal places. MongoDB stores this as Decimal128." },
+    "pricingRecordId": { "type": "string", "minLength": 1, "maxLength": 128 }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "pricingStatus": { "const": "priced" } }, "required": ["pricingStatus"] },
+      "then": { "required": ["cost_usd", "pricingRecordId"] }
+    },
+    {
+      "if": { "properties": { "pricingStatus": { "const": "unpriced" } }, "required": ["pricingStatus"] },
+      "then": { "not": { "anyOf": [{ "required": ["cost_usd"] }, { "required": ["pricingRecordId"] }] } }
+    }
+  ],
   "examples": [
     {
       "_id": "d2719f32-43c1-4f42-9b4a-b14b6ad9ac2a",
@@ -49,6 +62,18 @@
       "provider": "openai",
       "model": "example-model",
       "usage": { "inputTokens": -1, "outputTokens": 120 }
+    },
+    {
+      "_id": "d2719f32-43c1-4f42-9b4a-b14b6ad9ac2a",
+      "schemaVersion": 1,
+      "occurredAt": "2026-10-17T05:00:00Z",
+      "receivedAt": "2026-10-17T05:00:01Z",
+      "tenantId": "acme",
+      "provider": "openai",
+      "model": "example-model",
+      "usage": { "inputTokens": 120, "outputTokens": 45 },
+      "pricingStatus": "priced",
+      "cost_usd": 0.000123
     }
   ]
 }
