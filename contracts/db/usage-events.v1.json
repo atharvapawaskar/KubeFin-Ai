@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/db/usage-events.v1.json",
+  "title": "usage_events (MongoDB collection)",
+  "description": "Proposed regular MongoDB collection. The eventId value is stored as _id so MongoDB's built-in unique _id index provides idempotent inserts. A regular collection is used because MongoDB time-series collections do not support the required unique event-id index.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_id", "schemaVersion", "occurredAt", "receivedAt", "tenantId", "provider", "model", "usage"],
+  "properties": {
+    "_id": { "type": "string", "format": "uuid" },
+    "schemaVersion": { "const": 1 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "receivedAt": { "type": "string", "format": "date-time" },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "teamId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "workloadId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "requestId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "model": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputTokens", "outputTokens"],
+      "properties": {
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "examples": [
+    {
+      "_id": "d2719f32-43c1-4f42-9b4a-b14b6ad9ac2a",
+      "schemaVersion": 1,
+      "occurredAt": "2026-10-17T05:00:00Z",
+      "receivedAt": "2026-10-17T05:00:01Z",
+      "tenantId": "acme",
+      "provider": "openai",
+      "model": "example-model",
+      "usage": { "inputTokens": 120, "outputTokens": 45 }
+    }
+  ],
+  "invalidExamples": [
+    {
+      "_id": "d2719f32-43c1-4f42-9b4a-b14b6ad9ac2a",
+      "schemaVersion": 1,
+      "occurredAt": "2026-10-17T05:00:00Z",
+      "receivedAt": "2026-10-17T05:00:01Z",
+      "tenantId": "acme",
+      "provider": "openai",
+      "model": "example-model",
+      "usage": { "inputTokens": -1, "outputTokens": 120 }
+    }
+  ]
+}
