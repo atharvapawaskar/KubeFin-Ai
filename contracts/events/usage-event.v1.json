@@ -1,0 +1,116 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/events/usage-event.v1.json",
+  "title": "usage-event (Redis Stream payload)",
+  "description": "Asynchronous usage event emitted by Gateway (M1) to Redis Stream 'usage-events' (published as the 'payload' field) for billable provider calls with trustworthy usage, consumed by Worker (M3) for cost calculation and aggregations.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "occurredAt",
+    "tenantId",
+    "provider",
+    "model",
+    "usage"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version number, fixed at integer 1 for this contract version."
+    },
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID acting as a stable idempotency key for one billable provider call; reused unchanged across Redis publication retries."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp indicating when the billable provider call occurred; must be serialized in UTC with a trailing 'Z' (e.g., via Date.toISOString())."
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Tenant identifier attributing the request."
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Open, non-empty canonical identifier for the LLM provider (e.g., 'openai', 'anthropic', 'gemini', 'ollama')."
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Effective provider model ID used for the call (e.g., 'gpt-4o', 'claude-3-5-sonnet-20241022')."
+    },
+    "usage": {
+      "type": "object",
+      "description": "Raw trustworthy token usage reported by the provider. Do not emit usage events if trustworthy usage is unknown or unavailable.",
+      "required": [
+        "inputTokens",
+        "outputTokens"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Non-negative safe integer count of input/prompt tokens."
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Non-negative safe integer count of output/completion tokens. A value of 0 is valid only when trustworthy provider usage explicitly reports zero; unknown usage must never be substituted with zero."
+        }
+      }
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Gateway correlation ID for end-to-end tracing and debugging."
+    },
+    "teamId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional team attribution identifier."
+    },
+    "workloadId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional workload attribution identifier."
+    }
+  },
+  "examples": [
+    {
+      "schemaVersion": 1,
+      "eventId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "occurredAt": "2026-10-17T17:15:30.123Z",
+      "tenantId": "acme-corp",
+      "provider": "openai",
+      "model": "gpt-4o",
+      "usage": {
+        "inputTokens": 1420,
+        "outputTokens": 385
+      },
+      "requestId": "req_01j9x7k5v4h2w1",
+      "teamId": "ml-platform",
+      "workloadId": "rag-summarizer"
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "550e8400-e29b-41d4-a716-446655440000",
+      "occurredAt": "2026-10-17T17:15:30.000Z",
+      "tenantId": "acme-corp",
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20241022",
+      "usage": {
+        "inputTokens": 2048,
+        "outputTokens": 0
+      }
+    }
+  ]
+}
