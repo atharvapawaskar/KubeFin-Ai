@@ -1,7 +1,7 @@
 # Worker and Control Plane State
 
 ## Current task
-Stage 5 analytics API for dashboard spend data.
+Stage 7 Kubernetes workload discovery groundwork.
 
 ## Stage status
 - Stage 1 Worker startup foundation: merged in PR #3.
@@ -9,6 +9,7 @@ Stage 5 analytics API for dashboard spend data.
 - Stage 3 currency-aware pricing contracts and Worker implementation: merged in PRs #11 and #13; state follow-up merged in PR #14.
 - Stage 4 rollup contracts and Worker aggregation: merged in PRs #15 and #16. PR #16 CI passed.
 - Stage 5 currency-safe analytics API contract: merged in PR #17. The Control Plane API implementation is prepared for review.
+- Stage 6 currency-aware budget contract and Control Plane API: merged in PRs #20 and #22. Gateway enforcement and dashboard integration remain Member 1 and Member 2 work.
 
 ## Stage 5 implementation
 - Adds `services/control-plane/` with `GET /api/v2/analytics/spend`; keeps the USD-only v1 contract unchanged.
@@ -34,9 +35,17 @@ Stage 5 analytics API for dashboard spend data.
 - Adds proposed `budgets.v2.json` and `control-plane-budgets.v2.yaml`: positive exact decimal-string limits plus three-letter currency codes, with tenant scope derived from the verified OIDC principal. Keeps legacy budgets v1 unchanged.
 - Implements authenticated create/list/read/update/delete routes at `/api/v2/budgets`, tenant-scoped MongoDB access, a unique scope/currency/period index, bounded signed-cursor pagination, and current daily/monthly spend reporting from raw usage events. Responses include unpriced-event count, spend status, and an as-of timestamp.
 - Current-period spend is informational processed usage and can lag Gateway traffic. It does not implement hard enforcement. Gateway enforcement still needs a reviewed Redis counter/key contract plus atomic reservation/settlement semantics with Member 1. Dashboard integration is owned by Member 2.
-- The v2 contracts remain proposals until the repository's required cross-member contract review is complete. The API code depends on that review and must not be presented as a frozen shared interface until then.
+- The budget v2 contract was merged in PR #20, and the dependent API implementation was merged in PR #22.
 
 ## Stage 6 verification and exit blockers
 - Control Plane `npm test` passes, including budget route/auth/pagination and repository tests for tenant scoping, signed cursors, exact decimal spend, and unknown pricing.
 - Worker `npm test` passes all 52 tests; `npm run validate:contracts` validates all 10 JSON schemas/examples; `git diff --check` passes.
-- MongoDB aggregation/index behavior and OIDC tenant mapping have not been exercised against live services. Contract review, Gateway Redis enforcement/integration, and Member 2 dashboard work remain outstanding, so Stage 6 is not end-to-end complete.
+- MongoDB aggregation/index behavior and OIDC tenant mapping have not been exercised against live services. Gateway Redis enforcement/integration and Member 2 dashboard work remain outstanding, so Stage 6 is not end-to-end complete.
+
+## Stage 7 Member 3 implementation status
+- Added opt-in Kubernetes Pod inventory to the Worker. It uses the in-cluster HTTPS API, projected ServiceAccount token and CA, TLS verification, bounded paginated snapshots, incremental watches with bookmark resume, and relists after resource-version expiry. It stores a MongoDB `kubernetes_workloads` inventory keyed by cluster ID, namespace, and Pod UID.
+- Added a read-only ClusterRole with `list` and `watch` access to Pods. The role must be bound to the actual Worker ServiceAccount in deployment configuration; no namespace/service-account naming assumption has been made.
+- Only configured tenant/team/workload label values, Pod identity, and owner references are persisted. The Worker requests Kubernetes partial object metadata and does not alter the shared usage-event or raw-event schemas.
+- Discovery is disabled by default. Enabling it requires a deployment cluster ID, the three identity label keys, and in-cluster or explicitly configured API host. Deleted Pods are marked inactive; the bounded 100,000-Pod snapshot is repeated only when watch recovery requires a relist.
+- Stage 7 is not complete end to end: the team has not agreed on a cluster-wide label convention; Member 1 has not confirmed that the Gateway derives the existing event identity fields from the same labels; RBAC binding and live cluster verification remain pending. Large deployments may require namespace-scoped watches.
+- Verification this turn: Worker TypeScript build and `git diff --check` passed locally. Automated tests and live Kubernetes/MongoDB integration were not run.
