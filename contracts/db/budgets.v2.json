@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/db/budgets.v2.json",
+  "title": "budgets v2 (MongoDB collection)",
+  "description": "Currency-specific budget limits. tenantId is assigned from the authenticated Control Plane principal; clients cannot choose or update it. Stage 6 Gateway enforcement must use the same currency and budget period semantics. This contract does not imply FX conversion or a spend counter implementation.",
+  "type": "object",
+  "required": ["_id", "tenantId", "scope", "limitAmount", "currency", "period", "alertThresholdPct", "enforcement", "createdAt", "updatedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "_id": { "type": "string", "pattern": "^bud_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "scope": {
+      "oneOf": [
+        { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "tenant" } } },
+        { "type": "object", "required": ["type", "id"], "additionalProperties": false, "properties": { "type": { "const": "team" }, "id": { "type": "string", "minLength": 1, "maxLength": 256 } } },
+        { "type": "object", "required": ["type", "id"], "additionalProperties": false, "properties": { "type": { "const": "workload" }, "id": { "type": "string", "minLength": 1, "maxLength": 256 } } }
+      ]
+    },
+    "limitAmount": { "type": "string", "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,12})?$", "description": "Positive exact decimal amount in the declared currency; persisted as a string to avoid binary floating-point loss." },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "ISO 4217 currency code. No FX conversion is implied." },
+    "period": { "type": "string", "enum": ["daily", "monthly"], "description": "UTC calendar period." },
+    "alertThresholdPct": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "enforcement": { "type": "string", "enum": ["hard", "alert_only"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "examples": [
+    {
+      "_id": "bud_42f9e34a-7231-4c4b-a5bb-09f98ed25521",
+      "tenantId": "acme",
+      "scope": { "type": "tenant" },
+      "limitAmount": "12500.00",
+      "currency": "INR",
+      "period": "monthly",
+      "alertThresholdPct": 80,
+      "enforcement": "alert_only",
+      "createdAt": "2026-10-01T00:00:00.000Z",
+      "updatedAt": "2026-10-01T00:00:00.000Z"
+    }
+  ],
+  "invalidExamples": [
+    {
+      "_id": "bud_42f9e34a-7231-4c4b-a5bb-09f98ed25521",
+      "tenantId": "acme",
+      "scope": { "type": "tenant" },
+      "limitAmount": "0",
+      "currency": "INR",
+      "period": "monthly",
+      "alertThresholdPct": 80,
+      "enforcement": "hard",
+      "createdAt": "2026-10-01T00:00:00.000Z",
+      "updatedAt": "2026-10-01T00:00:00.000Z"
+    }
+  ]
+}

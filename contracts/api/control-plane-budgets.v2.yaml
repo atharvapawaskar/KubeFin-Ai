@@ -1,0 +1,174 @@
+openapi: 3.0.3
+info:
+  title: Kubefin Control Plane Budget API
+  version: 2.0.0
+  description: |
+    Stage 6 currency-aware budget CRUD. Every operation requires a verified bearer token.
+    Tenant scope is derived from the token; clients cannot submit a tenantId. Budget amounts
+    are exact decimal strings with an explicit ISO 4217 currency. No FX conversion is implied.
+    Current spend is calculated from processed raw usage events for the current UTC period; it
+    can lag Gateway traffic and is informational, not a hard-enforcement counter.
+    Creating a budget requires a principal scoped to exactly one tenant.
+servers:
+  - url: http://localhost:4000
+security:
+  - bearerAuth: []
+paths:
+  /api/v2/budgets:
+    get:
+      operationId: listBudgets
+      parameters:
+        - name: pageSize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string, maxLength: 2048 }
+      responses:
+        '200':
+          description: Budgets visible to the authenticated tenant scope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Budget' }
+                  nextCursor: { type: string, nullable: true, maxLength: 2048, description: Opaque signed cursor bound to the authenticated tenant set. }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createBudget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BudgetInput' }
+      responses:
+        '201':
+          description: Budget created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Budget' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /api/v2/budgets/{budgetId}:
+    parameters:
+      - name: budgetId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getBudget
+      responses:
+        '200':
+          description: Budget record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Budget' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '400': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    put:
+      operationId: updateBudget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BudgetInput' }
+      responses:
+        '200':
+          description: Updated budget record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Budget' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteBudget
+      responses:
+        '204': { description: Budget deleted. }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '400': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Error:
+      description: Error response.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+  schemas:
+    BudgetInput:
+      type: object
+      additionalProperties: false
+      required: [scope, limitAmount, currency, period]
+      properties:
+        scope:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [type]
+              properties: { type: { type: string, enum: [tenant] } }
+            - type: object
+              additionalProperties: false
+              required: [type, id]
+              properties:
+                type: { type: string, enum: [team] }
+                id: { type: string, minLength: 1, maxLength: 256 }
+            - type: object
+              additionalProperties: false
+              required: [type, id]
+              properties:
+                type: { type: string, enum: [workload] }
+                id: { type: string, minLength: 1, maxLength: 256 }
+        limitAmount: { type: string, pattern: '^(?=.*[1-9])(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,12})?$', description: Positive exact decimal string with up to 18 integer and 12 fractional digits. }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: ISO 4217 currency code. }
+        period: { type: string, enum: [daily, monthly] }
+        alertThresholdPct: { type: integer, minimum: 1, maximum: 100, default: 80 }
+        enforcement: { type: string, enum: [hard, alert_only], default: hard }
+    Budget:
+      allOf:
+        - $ref: '#/components/schemas/BudgetInput'
+        - type: object
+          required: [id, tenantId, createdAt, updatedAt, currentSpendAmount, unpricedEventCount, spendStatus, spendAsOf]
+          properties:
+            id: { type: string, pattern: '^bud_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' }
+            tenantId: { type: string, minLength: 1, maxLength: 256 }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+            currentSpendAmount: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,12})?$', description: Spend in the budget currency from processed priced events. }
+            unpricedEventCount: { type: integer, minimum: 0, description: Unpriced events in the scope and current UTC period; nonzero means spendStatus is unknown. }
+            spendStatus: { type: string, enum: [ok, warning, exceeded, unknown] }
+            spendAsOf: { type: string, format: date-time }
