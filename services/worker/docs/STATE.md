@@ -1,7 +1,7 @@
 # Worker and Control Plane State
 
 ## Current task
-Stage 9 Member 3 deployment and observability. Stage 8 contract and implementation are merged in PRs #24 and #25; Stage 7 discovery is merged in PR #23.
+Stage 10 Member 3 reliability, security, and final integration. Stage 8 contract and implementation are merged in PRs #24 and #25; Stage 7 discovery is merged in PR #23.
 
 ## Stage status
 - Stage 1 Worker startup foundation: merged in PR #3.
@@ -12,7 +12,7 @@ Stage 9 Member 3 deployment and observability. Stage 8 contract and implementati
 - Stage 6 currency-aware budget contract and Control Plane API implementation: merged in PRs #20 and #22. Gateway enforcement and dashboard integration remain other-member work.
 - Stage 7 opt-in Kubernetes workload discovery: merged in PR #23.
 - Stage 8 recommendations contract and implementation: merged in PRs #24 and #25; live data reconciliation and dashboard integration remain outstanding.
-- Stage 9 Worker container, Helm deployment, and Prometheus assets: PR #26 is open and CI run #52 passed; review and target-cluster rollout remain pending.
+- Stage 9 Worker container, Helm deployment, and Prometheus assets: merged in PR #26; CI run #53 passed. Target-cluster rollout remains pending.
 
 ## Stage 5 implementation
 - Adds `services/control-plane/` with `GET /api/v2/analytics/spend`; keeps the USD-only v1 contract unchanged.
@@ -68,3 +68,10 @@ Stage 9 Member 3 deployment and observability. Stage 8 contract and implementati
 - Root Compose remains limited to MongoDB and Redis per the existing repository CI constraint. No production registry, credentials, namespace label convention, replica target, or public endpoint was invented.
 - Worker `npm test` passed all 60 tests; `npm run validate:contracts` validated all 10 schemas/examples; Helm chart values and Prometheus YAML files parsed locally; `git diff --check` passed. Local Helm validation is unavailable because Helm is not installed. Docker image build could not run because no Docker daemon is running. GitHub CI now lints/renders default and discovery-enabled Helm templates and builds the image.
 - CI run #52 passed repository structure, Worker and Control Plane tests, contract validation, Helm lint/default+discovery rendering, and the Worker image build. No live Kubernetes, MongoDB, Redis, or Prometheus integration was available. A non-production cluster rollout still needs to verify image pull, real dependency connectivity, readiness, RBAC behavior if discovery is enabled, scrape health, and alert evaluation.
+
+## Stage 10 Member 3 reliability, security, and final integration
+- This Stage 10 proposal adds a dedicated CI integration job using disposable MongoDB 7 and Redis 7 services. It exercises the actual Redis Streams and MongoDB adapters through a transient persistence failure, stops the first consumer, and verifies a fresh consumer reclaims and persists the pending event.
+- The same integration test checks duplicate event idempotency, exact INR Decimal128 cost for deterministic test rates, invalid-event DLQ metadata without storing/logging prompt content, and source acknowledgement cleanup. The persistence outage is injected at the sink boundary; it validates retry/recovery behavior without claiming a real MongoDB process outage test.
+- Deployment CI now checks that rendered defaults retain the chart's non-root, read-only filesystem, no privilege escalation, RuntimeDefault seccomp, and dropped-capability settings. The operations runbook documents deploy/smoke checks, queue and dependency recovery, DLQ handling, rollback, secret/RBAC checks, and cost reconciliation.
+- Shared contracts remain unchanged. This implementation uses the merged usage-event and raw-event behavior as it exists; any new contract versions require review from affected members.
+- Remaining Stage 10 exit work is environment-dependent: real target-cluster rollout and rollback, actual MongoDB/Redis process outage/failover, Gateway/Control Plane/dashboard end-to-end integration, invoice/sample reconciliation against approved provider prices, and agreed representative load/SLO measurements.

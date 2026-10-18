@@ -176,13 +176,15 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 ### Stage 10 — Reliability, security, and final integration
 
-**What we are doing:** Checking that Member 3 components and their integrations behave under realistic failure and operational conditions.
+**What we are doing:** Verifying that the Worker and Member 3-owned deployment can recover safely, preserve event identity, keep cost calculations exact, and be operated securely.
 
-**How:** Coordinate end-to-end checks with Members 1 and 2; test Redis/MongoDB outage and recovery, duplicate events, consumer restarts, cost reconciliation, API behavior, deployment rollback, permissions, secret handling, and relevant load targets. Document runbooks and finalize contract versions.
+**How:** Add disposable MongoDB and Redis services to CI and run the production Redis/Mongo adapters end to end. Inject one transient persistence failure, stop the first consumer, and verify a restarted consumer reclaims and stores the pending event; verify duplicate event IDs persist once, INR Decimal128 cost is exact, and invalid events reach the DLQ without exposing payload contents. Check hardened Helm defaults in CI and use the Worker runbook for deployment, recovery, rollback, permissions, secrets, and reconciliation. Coordinate Gateway/Control Plane/dashboard checks with Members 1 and 2 without changing shared contracts in this stage PR.
 
-**Why:** The Worker sits on a financial data path; missed, duplicated, or mispriced events undermine trust in the whole product.
+**Why:** The Worker carries financial usage data. Recovery must not silently lose events, duplicates must not double count, and operational access must not expose credentials or sensitive payloads.
 
-**Exit checks:** Agreed reliability/security criteria pass, operational recovery is documented, and the Member 3-owned system is supportable by the team.
+**Exit checks:** CI integration and rendered-chart security checks pass; incident and rollback procedures are documented; representative load targets, production cost reconciliation, live dependency failover, target-cluster rollout, and cross-member API behavior are verified with the team before calling the entire Stage 10 end-to-end complete.
+
+**Current Stage 10 implementation:** The integration test simulates a transient sink failure (rather than stopping the MongoDB process), then verifies recovery after a consumer restart using real MongoDB and Redis services. It also covers duplicate delivery, deterministic INR cost, DLQ payload minimization, and acknowledgement. CI provisions ephemeral MongoDB 7/Redis 7 services; this environment has no configured cluster, so production deployment, failover, and load evidence remain outstanding.
 
 ## 4. Working rhythm for each stage
 
@@ -196,8 +198,8 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 ## 5. Immediate next actions
 
-1. Obtain review and merge the focused Stage 9 deployment and observability PR; CI run #52 has passed.
-2. Build/push an immutable Worker image to the team's registry and create the pre-provisioned MongoDB/Redis Secret in the target namespace.
-3. Confirm the Kubernetes label convention and least-privilege scope before enabling workload discovery.
-4. Install the chart in a non-production cluster, verify probes and readiness against real dependencies, and confirm Prometheus scrapes the metrics Service and evaluates the alert rules.
-5. Measure CPU, memory, throughput, and lag under representative load before changing replicas, resources, or alert thresholds; capture remaining cross-member integration work for Stage 10.
+1. Review and merge the Stage 10 implementation after CI passes.
+2. In a non-production Kubernetes environment, deploy an immutable Worker image, provision MongoDB/Redis credentials through the approved secret workflow, and verify readiness, metrics scraping, permissions, and the runbook rollback procedure.
+3. Run controlled Redis and MongoDB outage/failover drills, then reconcile representative Worker records and exact currency-separated costs against approved source data.
+4. Coordinate Gateway event production, Control Plane API behavior, and dashboard integration with Members 1 and 2; record agreed contract versions without changing them unilaterally.
+5. Agree on representative load targets and SLOs with the team, measure throughput, resource usage, p95 processing time, lag, and recovery time, then record evidence before declaring Stage 10 end-to-end complete.
