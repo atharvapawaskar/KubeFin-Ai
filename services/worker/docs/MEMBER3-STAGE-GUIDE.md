@@ -150,15 +150,17 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **Exit checks:** The Gateway and Worker use an agreed identity mapping, a test workload is discovered and appears in usage attribution, RBAC is bound and verified as least privilege, and live recovery behavior is checked in a Kubernetes/MongoDB environment.
 
-### Stage 8 — Recommendations
+### Stage 8 — Recommendations — IMPLEMENTATION PR OPEN
 
-**What we are doing:** Generating explainable cost/performance optimization recommendations from usage and aggregation data.
+**What we are doing:** Generating explainable model evaluation candidates from a complete 30-day workload history and exposing them through the authenticated Control Plane API.
 
-**How:** Start with explicit deterministic rules (for example, comparable usage on a lower-cost model), document assumptions and savings calculation, persist results using the approved recommendations contract, and expose them through the API for Member 2's UI.
+**How:** Contract PR #24 is merged. The Worker compares only same-provider, same-currency model rates over 30 complete UTC daily windows with published generations, explicit workload identity, and fully priced usage. Any attributed unpriced usage suppresses a recommendation for that workload/model. Exact Decimal128 savings include source generation IDs, pricing record IDs, and assumptions. A dry-run CLI previews results; `--apply` is required to upsert. The API derives tenant scope from the verified principal, keeps currencies separate, and uses bounded signed-cursor pagination. Suggestions require a controlled quality/latency evaluation before a model change; no routing is automatic.
 
-**Why:** Recommendations turn historical spend data into possible actions while keeping estimates understandable.
+**Why:** Historical usage can surface lower-cost candidates while preserving reproducible evidence and avoiding unsupported quality claims.
 
-**Exit checks:** Each recommendation has evidence, assumptions, and a reproducible savings estimate; unsupported recommendations are not presented as facts.
+**Current implementation:** Prepared on `m3/stage8-recommendations`; the implementation PR is ready for review. Worker build and 58 tests, Control Plane build and 6 tests, 10 contract schemas/examples, CLI syntax, and whitespace checks passed locally.
+
+**Exit checks:** Merge after review and CI; reconcile against real MongoDB generations and approved rates; integrate the endpoint with Member 2's dashboard; decide scheduling and stale-result handling. Live database and dashboard integration have not been run here.
 
 ### Stage 9 — Deployment and observability
 

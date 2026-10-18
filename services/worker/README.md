@@ -73,6 +73,20 @@ Required when enabled: `KUBERNETES_CLUSTER_ID`, `KUBERNETES_TENANT_LABEL_KEY`, `
 
 From this directory, use `npm ci`, `npm test`, and `npm start`. Start MongoDB and Redis using the repository's root Docker Compose file. The Worker must not log event payloads, prompts, completions, credentials, or PII.
 
+## Stage 8 model evaluation recommendations
+
+The initial deterministic rule compares a workload's observed model with lower-cost models from the same provider and currency. It requires exactly 30 complete UTC daily windows with published Stage 4 generations, priced usage, an explicit workload identity, and one candidate pricing rate that covers every day with usage. It skips unpriced, unattributed, incomplete, ambiguous, and non-saving cases. Savings use exact integer/Decimal128 arithmetic and are stored in the proposed recommendations v2 shape with source generations and candidate pricing-record IDs.
+
+These are evaluation suggestions, not claims of equivalent quality or latency and not automatic routing changes. Provider and cache rules are excluded because the current usage contracts do not provide enough evidence for them. The existing v1 recommendation contract is USD-only; the currency-safe v2 database and API contracts were reviewed and merged in PR #24.
+
+Preview a 30-day UTC window without writing:
+
+```sh
+npm run recommendations:generate -- --from 2026-09-01T00:00:00Z --to 2026-10-01T00:00:00Z
+```
+
+The CLI refuses to run if any daily aggregation window lacks a published generation. It bounds a run to 100,000 rollup rows, 10,000 pricing records, and 10,000 output recommendations; larger runs fail closed and should be partitioned by tenant. Preview output shows at most 100 items. Add `--apply` to upsert recommendations by deterministic ID. The command does not schedule itself; scheduling and retention remain deployment decisions. The authenticated Control Plane exposes persisted records at `GET /api/v2/recommendations` with currency-separated ordering and signed pagination.
+
 ## Dependency choices
 
 - Fastify supplies the HTTP health server and its Pino logger.

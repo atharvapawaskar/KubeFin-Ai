@@ -49,3 +49,11 @@ Stage 7 Kubernetes workload discovery groundwork.
 - Discovery is disabled by default. Enabling it requires a deployment cluster ID, the three identity label keys, and in-cluster or explicitly configured API host. Deleted Pods are marked inactive; the bounded 100,000-Pod snapshot is repeated only when watch recovery requires a relist.
 - Stage 7 is not complete end to end: the team has not agreed on a cluster-wide label convention; Member 1 has not confirmed that the Gateway derives the existing event identity fields from the same labels; RBAC binding and live cluster verification remain pending. Large deployments may require namespace-scoped watches.
 - Verification this turn: Worker TypeScript build and `git diff --check` passed locally. Automated tests and live Kubernetes/MongoDB integration were not run.
+
+## Stage 8 Member 3 recommendations implementation
+
+- Contract PR #24, including currency-safe evidence-bearing recommendations v2 and the tenant-scoped API shape, is merged.
+- The implementation branch `m3/stage8-recommendations` adds a deterministic same-provider model evaluation rule requiring a complete 30-day window, active daily generations, explicit workload attribution, same-currency price coverage, positive exact savings, and no unpriced usage for the attributed workload/model.
+- The Worker previews by default and writes only with explicit `--apply`; persisted evidence identifies source generations and candidate pricing records. The Control Plane exposes authenticated tenant-scoped reads with currency-separated results and signed bounded pagination.
+- Worker build and 58 tests passed; Control Plane build and all 6 tests passed; 10 JSON contract schemas/examples, CLI syntax, and whitespace checks passed.
+- Live MongoDB reconciliation and Member 2 dashboard integration remain unverified. Scheduling and stale recommendation handling remain deployment decisions.

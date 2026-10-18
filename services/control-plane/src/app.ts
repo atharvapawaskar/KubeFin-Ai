@@ -2,11 +2,13 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import type { Authenticator, Principal } from './auth.js';
 import { InvalidAnalyticsQueryError, InvalidAnalyticsResultError, parseAnalyticsQuery, type MongoAnalyticsRepository } from './analytics.js';
 import { DuplicateBudgetError, InvalidBudgetCursorError, InvalidBudgetDataError, InvalidBudgetError, parseBudgetListQuery, type MongoBudgetRepository } from './budgets.js';
+import { InvalidRecommendationCursorError, InvalidRecommendationDataError, InvalidRecommendationQueryError, parseRecommendationListQuery, type MongoRecommendationsRepository } from './recommendations.js';
 
 export interface ControlPlaneAppOptions {
   authenticator: Authenticator;
   repository: Pick<MongoAnalyticsRepository, 'spend'>;
   budgets?: MongoBudgetRepository;
+  recommendations?: MongoRecommendationsRepository;
   checkReady: () => Promise<void>;
   maxConcurrentRequests?: number;
 }
@@ -115,6 +117,24 @@ export function createControlPlaneApp(options: ControlPlaneAppOptions): FastifyI
     principals.set(request, principal);
   };
   const budgetRepository = options.budgets;
+  if (options.recommendations) {
+    app.get('/api/v2/recommendations', { preHandler: budgetAuth }, async (request, reply) => {
+      const principal = principals.get(request);
+      if (!principal) return reply.code(401).send(errorBody('UNAUTHENTICATED', 'A valid bearer token is required.'));
+      try {
+        const query = parseRecommendationListQuery(request.query);
+        return await options.recommendations!.list(principal, query);
+      } catch (error) {
+        if (error instanceof InvalidRecommendationQueryError) return reply.code(400).send(errorBody('INVALID_FILTER', error.message));
+        if (error instanceof InvalidRecommendationCursorError) return reply.code(400).send(errorBody('INVALID_CURSOR', error.message));
+        if (error instanceof InvalidRecommendationDataError) return reply.code(500).send(errorBody('INTERNAL_ERROR', 'Recommendation data could not be processed.'));
+        if (typeof error === 'object' && error !== null && 'statusCode' in error && Number((error as { statusCode: unknown }).statusCode) === 403) {
+          return reply.code(403).send(errorBody('FORBIDDEN', 'The authenticated principal has no tenant access.'));
+        }
+        return reply.code(503).send(errorBody('DATA_UNAVAILABLE', 'Recommendation storage is temporarily unavailable.'));
+      }
+    });
+  }
   if (budgetRepository) {
     app.get('/api/v2/budgets', { preHandler: budgetAuth }, async (request, reply) => {
       const principal = principals.get(request);

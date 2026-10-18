@@ -4,6 +4,7 @@ import { createControlPlaneApp } from '../src/app.js';
 import type { Authenticator, Principal } from '../src/auth.js';
 import type { MongoAnalyticsRepository } from '../src/analytics.js';
 import type { MongoBudgetRepository } from '../src/budgets.js';
+import type { MongoRecommendationsRepository } from '../src/recommendations.js';
 
 const okPrincipal: Principal = { subject: 'user-a', tenantIds: ['tenant-a'] };
 
@@ -102,5 +103,31 @@ test('budget API authenticates requests, validates pagination, and returns a pag
   assert.equal(result.statusCode, 200);
   assert.deepEqual(JSON.parse(result.body), { items: [], nextCursor: null });
   assert.deepEqual(queries, [{ pageSize: 20 }]);
+  await app.close();
+});
+
+
+test('recommendations API authenticates, validates filters, and scopes reads to authorized tenants', async () => {
+  const calls: Array<{ tenantIds: readonly string[]; query: unknown }> = [];
+  const recommendations = {
+    list: async (principal: Principal, query: unknown) => {
+      calls.push({ tenantIds: principal.tenantIds, query });
+      return { items: [], nextCursor: null };
+    },
+  } as unknown as MongoRecommendationsRepository;
+  const app = createControlPlaneApp({
+    authenticator: { authenticate: async (header) => header === 'Bearer valid' ? okPrincipal : null },
+    repository: { spend: async () => ({}) } as unknown as MongoAnalyticsRepository,
+    recommendations,
+    checkReady: async () => undefined,
+  });
+  const unauthenticated = await app.inject({ method: 'GET', url: '/api/v2/recommendations' });
+  assert.equal(unauthenticated.statusCode, 401);
+  const invalid = await app.inject({ method: 'GET', url: '/api/v2/recommendations?pageSize=101', headers: { authorization: 'Bearer valid' } });
+  assert.equal(invalid.statusCode, 400);
+  const valid = await app.inject({ method: 'GET', url: '/api/v2/recommendations?currency=INR&pageSize=20', headers: { authorization: 'Bearer valid' } });
+  assert.equal(valid.statusCode, 200);
+  assert.deepEqual(JSON.parse(valid.body), { items: [], nextCursor: null });
+  assert.deepEqual(calls, [{ tenantIds: ['tenant-a'], query: { pageSize: 20, currency: 'INR' } }]);
   await app.close();
 });
