@@ -140,13 +140,15 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 ### Stage 7 — Kubernetes workload discovery and identity enrichment
 
-**What we are doing:** Discovering workloads and associating usage with their Kubernetes identity and metadata.
+**What we are doing:** Discovering Kubernetes Pods and maintaining a metadata inventory that can support consistent tenant, team, and workload attribution.
 
-**How:** Agree the ServiceAccount/label/annotation mapping with Gateway and platform stakeholders. Implement a least-privilege Kubernetes watcher and metadata sync path; enrich events only with approved fields.
+**How:** The Worker uses projected ServiceAccount credentials over verified HTTPS, obtains a bounded paginated Pod snapshot, then maintains it with incremental watch events and bookmark-based resource-version recovery. Only configured label values map to the existing `tenantId`, `teamId`, and `workloadId` fields; arbitrary labels and pod specs are not stored. Discovery is disabled by default and requires an explicit cluster ID and label-key configuration. A read-only ClusterRole grants only Pod list/watch. Do not alter shared event or raw-event contracts or treat inventory as Gateway attribution until Member 1 confirms the same label mapping.
 
 **Why:** Workload attribution makes spend actionable without manual mapping for every deployment.
 
-**Exit checks:** A test workload is discovered, its identity is mapped consistently into usage data, and access permissions are limited to required Kubernetes resources.
+**Current status:** The Member 3 Worker discovery implementation and RBAC role are prepared in this PR. The project has not selected a cluster-wide label convention, bound the role to the actual Worker ServiceAccount, or verified discovery on a live cluster. Gateway event attribution and shared mapping confirmation remain cross-member integration work.
+
+**Exit checks:** The Gateway and Worker use an agreed identity mapping, a test workload is discovered and appears in usage attribution, RBAC is bound and verified as least privilege, and live recovery behavior is checked in a Kubernetes/MongoDB environment.
 
 ### Stage 8 — Recommendations
 
