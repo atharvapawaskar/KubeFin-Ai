@@ -162,7 +162,7 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **Current implementation:** Contract proposal PR #24 defines an evidence-bearing currency-safe v2 and authenticated `/api/v2/recommendations` API shape. The Worker candidate implementation requires exactly 30 published daily windows, explicit workload attribution, same-provider and same-currency candidate rates covering every observed day, and positive savings. It writes preview output by default and only upserts with `--apply`. The Control Plane has tenant-scoped reads, exact Decimal128 sorting/serialization, and signed pagination. Only the model-evaluation rule is implemented; quality and latency are not inferred from token usage.
 
-**Open gates:** PR #24 requires both other members' review before merge. Worker and Control Plane integration against live MongoDB and the dashboard is still required. The CLI is an operator-triggered job until a schedule and stale-recommendation policy are approved.
+**Open gates:** PRs #24 and #25 are merged. Worker and Control Plane integration against live MongoDB and the dashboard is still required. The CLI is an operator-triggered job until a schedule and stale-recommendation policy are approved.
 
 ### Stage 9 — Deployment and observability
 
@@ -172,7 +172,7 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **Why:** A working local process is not yet a deployable, monitorable service. Operators need to know whether the Worker is healthy, falling behind, or routing events to the DLQ.
 
-**Exit checks:** Deployment is reproducible; probes reflect readiness; CI lints and renders default and discovery-enabled charts and builds the image; Prometheus can scrape the Worker; metrics and alerts expose queue lag and processing failures; logs contain no payload/PII/secrets. Actual cluster rollout, dependency connectivity, and Prometheus scrape must still be verified in an equipped environment.
+**Exit checks:** Deployment is reproducible; probes reflect readiness; CI lints and renders default and discovery-enabled charts and builds the image; Prometheus can scrape the Worker; metrics and alerts expose queue lag and processing failures; logs contain no payload/PII/secrets. CI run #52 passed. Actual cluster rollout, dependency connectivity, and Prometheus scrape must still be verified in an equipped environment.
 
 ### Stage 10 — Reliability, security, and final integration
 
@@ -196,7 +196,7 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 ## 5. Immediate next actions
 
-1. Review and merge the focused Stage 9 deployment and observability PR after its CI completes.
+1. Obtain review and merge the focused Stage 9 deployment and observability PR; CI run #52 has passed.
 2. Build/push an immutable Worker image to the team's registry and create the pre-provisioned MongoDB/Redis Secret in the target namespace.
 3. Confirm the Kubernetes label convention and least-privilege scope before enabling workload discovery.
 4. Install the chart in a non-production cluster, verify probes and readiness against real dependencies, and confirm Prometheus scrapes the metrics Service and evaluates the alert rules.

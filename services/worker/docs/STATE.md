@@ -12,7 +12,7 @@ Stage 9 Member 3 deployment and observability. Stage 8 contract and implementati
 - Stage 6 currency-aware budget contract and Control Plane API implementation: merged in PRs #20 and #22. Gateway enforcement and dashboard integration remain other-member work.
 - Stage 7 opt-in Kubernetes workload discovery: merged in PR #23.
 - Stage 8 recommendations contract and implementation: merged in PRs #24 and #25; live data reconciliation and dashboard integration remain outstanding.
-- Stage 9 Worker container, Helm deployment, and Prometheus assets: implementation prepared for review; CI and target-cluster rollout checks are pending.
+- Stage 9 Worker container, Helm deployment, and Prometheus assets: PR #26 is open and CI run #52 passed; review and target-cluster rollout remain pending.
 
 ## Stage 5 implementation
 - Adds `services/control-plane/` with `GET /api/v2/analytics/spend`; keeps the USD-only v1 contract unchanged.
@@ -67,4 +67,4 @@ Stage 9 Member 3 deployment and observability. Stage 8 contract and implementati
 - Added Prometheus annotation-based endpoint discovery and alert rules for scrape availability, stream lag, dead-letter events, and processing latency. Worker metrics now include sampled consumer-group lag and per-event processing duration alongside outcome counters; labels remain bounded.
 - Root Compose remains limited to MongoDB and Redis per the existing repository CI constraint. No production registry, credentials, namespace label convention, replica target, or public endpoint was invented.
 - Worker `npm test` passed all 60 tests; `npm run validate:contracts` validated all 10 schemas/examples; Helm chart values and Prometheus YAML files parsed locally; `git diff --check` passed. Local Helm validation is unavailable because Helm is not installed. Docker image build could not run because no Docker daemon is running. GitHub CI now lints/renders default and discovery-enabled Helm templates and builds the image.
-- No live Kubernetes, MongoDB, Redis, or Prometheus integration was available. Stage 9 requires CI to pass, then a non-production cluster rollout to verify image pull, real dependency connectivity, readiness, RBAC behavior if discovery is enabled, scrape health, and alert evaluation.
+- CI run #52 passed repository structure, Worker and Control Plane tests, contract validation, Helm lint/default+discovery rendering, and the Worker image build. No live Kubernetes, MongoDB, Redis, or Prometheus integration was available. A non-production cluster rollout still needs to verify image pull, real dependency connectivity, readiness, RBAC behavior if discovery is enabled, scrape health, and alert evaluation.
