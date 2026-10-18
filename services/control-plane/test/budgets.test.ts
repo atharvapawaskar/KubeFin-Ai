@@ -24,7 +24,10 @@ class MemoryCollection {
       return true;
     });
     return {
-      sort: () => ({ limit: (n: number) => ({ toArray: async () => docs.slice(0, n) }) }),
+      sort: () => {
+        docs.sort((a, b) => String(a.tenantId).localeCompare(String(b.tenantId)) || String(a._id).localeCompare(String(b._id)));
+        return { limit: (n: number) => ({ toArray: async () => docs.slice(0, n) }) };
+      },
     };
   }
   async findOne(filter: Document): Promise<Document | null> {
