@@ -3,6 +3,7 @@ import { OidcAuthenticator } from './auth.js';
 import { createControlPlaneApp } from './app.js';
 import { MongoAnalyticsRepository } from './analytics.js';
 import { MongoBudgetRepository } from './budgets.js';
+import { MongoRecommendationsRepository } from './recommendations.js';
 import { parseConfig } from './config.js';
 
 async function main(): Promise<void> {
@@ -22,8 +23,10 @@ async function main(): Promise<void> {
     cursorSigningKey: config.cursorSigningKey,
   });
   const budgets = new MongoBudgetRepository(db.collection<{ _id: string; [key: string]: unknown }>('budgets'), db.collection('usage_events'), config.cursorSigningKey);
+  const recommendations = new MongoRecommendationsRepository(db.collection('recommendations'), config.cursorSigningKey);
   await repository.ensureIndexes();
   await budgets.ensureIndexes();
+  await recommendations.ensureIndexes();
   const authenticator = new OidcAuthenticator({
     issuer: config.jwtIssuer,
     audience: config.jwtAudience,
@@ -34,6 +37,7 @@ async function main(): Promise<void> {
     authenticator,
     repository,
     budgets,
+    recommendations,
     checkReady: async () => { await db.command({ ping: 1 }); },
   });
 

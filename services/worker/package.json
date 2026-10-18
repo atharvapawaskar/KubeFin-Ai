@@ -13,7 +13,8 @@
     "pricing:backfill": "npm run build && node scripts/backfill-costs.mjs",
     "costs:aggregate": "npm run build && node scripts/aggregate-costs.mjs",
     "start": "node dist/src/main.js",
-    "test": "npm run build && node --test dist/test/*.test.js"
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "recommendations:generate": "npm run build && node scripts/generate-recommendations.mjs"
   },
   "dependencies": {
     "@prometheus-io/client": "0.16.1",
