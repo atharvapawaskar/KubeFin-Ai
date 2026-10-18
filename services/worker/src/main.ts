@@ -11,6 +11,11 @@ import { MongoPricingCatalog } from './pricing-catalog.js';
 import { MongoUsageEventStore } from './usage-event-store.js';
 import type { UsageEventDocument } from './usage-event.js';
 import { UsageStreamConsumer } from './stream-consumer.js';
+import {
+  createWorkloadDiscovery,
+  InClusterKubernetesPodSource,
+  KubernetesResourceVersionExpiredError,
+} from './kubernetes/workload-discovery.js';
 
 async function main(): Promise<void> {
   const config = parseConfig(process.env);
@@ -59,11 +64,31 @@ async function main(): Promise<void> {
       maxPayloadBytes: config.WORKER_MAX_EVENT_BYTES,
     },
   });
+  const workloadDiscovery = config.KUBERNETES_DISCOVERY_ENABLED
+    ? createWorkloadDiscovery(
+      new InClusterKubernetesPodSource({
+        host: config.KUBERNETES_API_HOST ?? config.KUBERNETES_SERVICE_HOST!,
+        port: config.KUBERNETES_API_PORT,
+        tokenFile: config.KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE,
+        caFile: config.KUBERNETES_SERVICE_ACCOUNT_CA_FILE,
+      }),
+      mongo.db().collection('kubernetes_workloads'),
+      {
+        clusterId: config.KUBERNETES_CLUSTER_ID!,
+        identityLabels: {
+          tenant: config.KUBERNETES_TENANT_LABEL_KEY!,
+          team: config.KUBERNETES_TEAM_LABEL_KEY!,
+          workload: config.KUBERNETES_WORKLOAD_LABEL_KEY!,
+        },
+      },
+    )
+    : undefined;
 
   const metricsServer = createMetricsServer(registry);
   let stopping = false;
   let shutdownPromise: Promise<void> | undefined;
   let workerTask: Promise<void> | undefined;
+  let workloadDiscoveryTask: Promise<void> | undefined;
   let reconnectAttempts = 0;
   const shutdownSignal = new AbortController();
 
@@ -110,6 +135,7 @@ async function main(): Promise<void> {
       // shutdown promptly. Unacknowledged stream entries remain recoverable.
       redis.destroy();
       await workerTask;
+      await workloadDiscoveryTask;
       await mongo.close();
       app.log.info('Worker shutdown complete');
     })();
@@ -128,6 +154,28 @@ async function main(): Promise<void> {
     while (!stopping) {
       await reconnectDependencies();
       if (stopping) return;
+      if (workloadDiscovery && !workloadDiscoveryTask) {
+        workloadDiscoveryTask = (async () => {
+          let resourceVersion: string | undefined;
+          while (!stopping) {
+            try {
+              await workloadDiscovery.ensureIndexes();
+              if (!resourceVersion) {
+                const snapshot = await workloadDiscovery.refresh();
+                resourceVersion = snapshot.resourceVersion;
+                app.log.info({ discovered: snapshot.count }, 'Kubernetes workload inventory refreshed');
+              }
+              resourceVersion = await workloadDiscovery.watch(resourceVersion, shutdownSignal.signal);
+              if (!stopping) await delay(1_000, undefined, { signal: shutdownSignal.signal }).catch(() => undefined);
+            } catch (error) {
+              if (stopping) return;
+              app.log.warn('Kubernetes workload discovery failed; retrying');
+              if (error instanceof KubernetesResourceVersionExpiredError) resourceVersion = undefined;
+              await delay(5_000, undefined, { signal: shutdownSignal.signal }).catch(() => undefined);
+            }
+          }
+        })();
+      }
       try {
         await consumer.run(shutdownSignal.signal);
       } catch {

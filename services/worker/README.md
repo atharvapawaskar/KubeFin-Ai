@@ -61,6 +61,14 @@ The command accepts at most 744 hourly windows or 366 daily windows per run. Add
 
 No TTL policy is created. Decide and approve retention before removing raw events or aggregate snapshots. Validate the first applied runs against known source-event totals in a MongoDB environment before scheduling them in production.
 
+## Stage 7 Kubernetes workload discovery
+
+Discovery is opt-in and disabled unless `KUBERNETES_DISCOVERY_ENABLED=true`. When enabled, the Worker reads the in-cluster API using the projected ServiceAccount token and CA, builds an initial Pod snapshot with bounded pagination, then follows incremental Pod watch events. Kubernetes watch bookmarks advance the resume version; an expired version triggers a fresh snapshot. The request prefers Kubernetes partial object metadata with a JSON fallback; the Worker persists only Pod identity, owner references, and configured tenant/team/workload label values. Arbitrary labels, annotations, container specs, and environment variables are not persisted. Pod UID plus cluster ID and namespace form the stable inventory key. Pods missing configured identity labels remain visible in inventory without those identity fields. Deleted Pods are marked inactive.
+
+Required when enabled: `KUBERNETES_CLUSTER_ID`, `KUBERNETES_TENANT_LABEL_KEY`, `KUBERNETES_TEAM_LABEL_KEY`, and `KUBERNETES_WORKLOAD_LABEL_KEY`. Label key names are deployment configuration because the team has not yet agreed on a cluster-wide label convention. Their values map to the existing usage-event `tenantId`, `teamId`, and `workloadId` fields; this implementation does not alter usage-event or raw-event contracts. `KUBERNETES_API_HOST` can explicitly set the API host; otherwise the standard in-cluster `KUBERNETES_SERVICE_HOST` is used. `KUBERNETES_API_PORT` defaults to 443, and ServiceAccount token/CA file paths default to Kubernetes' standard mount paths.
+
+`deploy/k8s/worker-workload-discovery-role.yaml` grants only `list` and `watch` access to Pods. Bind this ClusterRole to the actual Worker ServiceAccount during deployment. Do not enable discovery until the identity label keys and cluster ID are reviewed, and do not treat discovered metadata as Gateway attribution until Member 1 confirms the same mapping. The initial full snapshot is bounded to 100,000 Pods and subsequent updates are incremental; large clusters may require namespace-scoped watches.
+
 ## Local development
 
 From this directory, use `npm ci`, `npm test`, and `npm start`. Start MongoDB and Redis using the repository's root Docker Compose file. The Worker must not log event payloads, prompts, completions, credentials, or PII.

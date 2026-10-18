@@ -22,6 +22,16 @@ const environmentSchema = z
     WORKER_CLAIM_IDLE_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
     WORKER_MAX_DELIVERIES: z.coerce.number().int().min(1).max(100).default(5),
     WORKER_MAX_EVENT_BYTES: z.coerce.number().int().min(1_024).max(262_144).default(262_144),
+    KUBERNETES_DISCOVERY_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+    KUBERNETES_CLUSTER_ID: z.string().min(1).max(128).optional(),
+    KUBERNETES_TENANT_LABEL_KEY: z.string().min(1).max(253).optional(),
+    KUBERNETES_TEAM_LABEL_KEY: z.string().min(1).max(253).optional(),
+    KUBERNETES_WORKLOAD_LABEL_KEY: z.string().min(1).max(253).optional(),
+    KUBERNETES_SERVICE_HOST: z.string().min(1).max(253).optional(),
+    KUBERNETES_API_HOST: z.string().min(1).max(253).optional(),
+    KUBERNETES_API_PORT: z.coerce.number().int().min(1).max(65_535).default(443),
+    KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE: z.string().min(1).default('/var/run/secrets/kubernetes.io/serviceaccount/token'),
+    KUBERNETES_SERVICE_ACCOUNT_CA_FILE: z.string().min(1).default('/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'),
   })
   .superRefine((config, context) => {
     if (config.PORT === config.METRICS_PORT) {
@@ -30,6 +40,25 @@ const environmentSchema = z
         path: ['METRICS_PORT'],
         message: 'must differ from PORT so metrics use a separate listener',
       });
+    }
+    if (config.KUBERNETES_DISCOVERY_ENABLED) {
+      for (const key of [
+        'KUBERNETES_CLUSTER_ID',
+        'KUBERNETES_TENANT_LABEL_KEY',
+        'KUBERNETES_TEAM_LABEL_KEY',
+        'KUBERNETES_WORKLOAD_LABEL_KEY',
+      ] as const) {
+        if (!config[key]) {
+          context.addIssue({ code: 'custom', path: [key], message: 'is required when Kubernetes discovery is enabled' });
+        }
+      }
+      if (!config.KUBERNETES_API_HOST && !config.KUBERNETES_SERVICE_HOST) {
+        context.addIssue({
+          code: 'custom',
+          path: ['KUBERNETES_API_HOST'],
+          message: 'must be set explicitly or provided by the in-cluster Kubernetes environment',
+        });
+      }
     }
   });
 
