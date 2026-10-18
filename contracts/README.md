@@ -51,6 +51,8 @@ Phase 3 pricing v2 supports ISO 4217 currency codes. Each Worker deployment sele
 
 Stage 4 rollup proposals use UTC half-open windows and preserve tenant/team/workload/provider/model dimensions. Priced totals are separated by currency. Unpriced events form a separate group with a null currency and no cost amount. Rollups are rebuilt as generation snapshots; readers select only the generation published by the corresponding window-state record. The proposal does not set TTL or retention policy.
 
+Stage 6 budget v2 is a proposal for exact currency-specific limits, UTC daily/monthly periods, and authenticated tenant ownership. Its current-spend fields report processed raw usage and can lag Gateway traffic. The proposal does not define real-time Redis enforcement, atomic request reservations, settlement, or FX conversion; those integration decisions need cross-member review. Budget v1 remains available for existing consumers.
+
 ## Breaking Changes
 
 Require **explicit team agreement** before merging:
