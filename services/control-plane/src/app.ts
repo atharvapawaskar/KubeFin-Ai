@@ -1,10 +1,12 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { Authenticator, Principal } from './auth.js';
 import { InvalidAnalyticsQueryError, InvalidAnalyticsResultError, parseAnalyticsQuery, type MongoAnalyticsRepository } from './analytics.js';
+import { DuplicateBudgetError, InvalidBudgetCursorError, InvalidBudgetDataError, InvalidBudgetError, parseBudgetListQuery, type MongoBudgetRepository } from './budgets.js';
 
 export interface ControlPlaneAppOptions {
   authenticator: Authenticator;
   repository: Pick<MongoAnalyticsRepository, 'spend'>;
+  budgets?: MongoBudgetRepository;
   checkReady: () => Promise<void>;
   maxConcurrentRequests?: number;
 }
@@ -94,6 +96,87 @@ export function createControlPlaneApp(options: ControlPlaneAppOptions): FastifyI
       return reply.code(503).send(errorBody('DATA_UNAVAILABLE', 'Analytics data is temporarily unavailable.'));
     }
   });
+
+  const budgetAuth = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    let principal: Principal | null;
+    try { principal = await options.authenticator.authenticate(request.headers.authorization); }
+    catch {
+      reply.code(503).send(errorBody('DATA_UNAVAILABLE', 'Authentication is temporarily unavailable.'));
+      return;
+    }
+    if (!principal) {
+      reply.code(401).send(errorBody('UNAUTHENTICATED', 'A valid bearer token is required.'));
+      return;
+    }
+    if (!principal.tenantIds.length) {
+      reply.code(403).send(errorBody('FORBIDDEN', 'The authenticated principal has no tenant access.'));
+      return;
+    }
+    principals.set(request, principal);
+  };
+  const budgetRepository = options.budgets;
+  if (budgetRepository) {
+    app.get('/api/v2/budgets', { preHandler: budgetAuth }, async (request, reply) => {
+      const principal = principals.get(request);
+      if (!principal) return reply.code(401).send(errorBody('UNAUTHENTICATED', 'A valid bearer token is required.'));
+      try {
+        const query = parseBudgetListQuery(request.query);
+        return await budgetRepository.list(principal, query);
+      }
+      catch (error) {
+        if (error instanceof InvalidBudgetError || error instanceof InvalidBudgetCursorError) return reply.code(400).send(errorBody('INVALID_FILTER', error.message));
+        if (error instanceof InvalidBudgetDataError) return reply.code(500).send(errorBody('INTERNAL_ERROR', 'Budget data could not be processed.'));
+        return reply.code(503).send(errorBody('DATA_UNAVAILABLE', 'Budget storage is temporarily unavailable.'));
+      }
+    });
+    app.post('/api/v2/budgets', { preHandler: budgetAuth }, async (request, reply) => {
+      const principal = principals.get(request);
+      if (!principal) return reply.code(401).send(errorBody('UNAUTHENTICATED', 'A valid bearer token is required.'));
+      try { return reply.code(201).send(await budgetRepository.create(principal, request.body)); }
+      catch (error) {
+        if (error instanceof InvalidBudgetError) return reply.code(400).send(errorBody('INVALID_BUDGET', error.message));
+        if (error instanceof DuplicateBudgetError) return reply.code(409).send(errorBody('BUDGET_CONFLICT', error.message));
+        if (error instanceof InvalidBudgetDataError) return reply.code(500).send(errorBody('INTERNAL_ERROR', 'Budget data could not be processed.'));
+        return reply.code(503).send(errorBody('DATA_UNAVAILABLE', 'Budget storage is temporarily unavailable.'));
+      }
+    });
+    app.get<{ Params: { budgetId: string } }>('/api/v2/budgets/:budgetId', { preHandler: budgetAuth }, async (request, reply) => {
+      const principal = principals.get(request);
+      if (!principal) return reply.code(401).send(errorBody('UNAUTHENTICATED', 'A valid bearer token is required.'));
+      try {
+        const budget = await budgetRepository.get(principal, request.params.budgetId);
+        return budget ? budget : reply.code(404).send(errorBody('NOT_FOUND', 'Budget not found.'));
+      } catch (error) {
+        if (error instanceof InvalidBudgetError) return reply.code(400).send(errorBody('INVALID_BUDGET', error.message));
+        if (error instanceof InvalidBudgetDataError) return reply.code(500).send(errorBody('INTERNAL_ERROR', 'Budget data could not be processed.'));
+        return reply.code(503).send(errorBody('DATA_UNAVAILABLE', 'Budget storage is temporarily unavailable.'));
+      }
+    });
+    app.put<{ Params: { budgetId: string } }>('/api/v2/budgets/:budgetId', { preHandler: budgetAuth }, async (request, reply) => {
+      const principal = principals.get(request);
+      if (!principal) return reply.code(401).send(errorBody('UNAUTHENTICATED', 'A valid bearer token is required.'));
+      try {
+        const budget = await budgetRepository.update(principal, request.params.budgetId, request.body);
+        return budget ? budget : reply.code(404).send(errorBody('NOT_FOUND', 'Budget not found.'));
+      } catch (error) {
+        if (error instanceof InvalidBudgetError) return reply.code(400).send(errorBody('INVALID_BUDGET', error.message));
+        if (error instanceof DuplicateBudgetError) return reply.code(409).send(errorBody('BUDGET_CONFLICT', error.message));
+        if (error instanceof InvalidBudgetDataError) return reply.code(500).send(errorBody('INTERNAL_ERROR', 'Budget data could not be processed.'));
+        return reply.code(503).send(errorBody('DATA_UNAVAILABLE', 'Budget storage is temporarily unavailable.'));
+      }
+    });
+    app.delete<{ Params: { budgetId: string } }>('/api/v2/budgets/:budgetId', { preHandler: budgetAuth }, async (request, reply) => {
+      const principal = principals.get(request);
+      if (!principal) return reply.code(401).send(errorBody('UNAUTHENTICATED', 'A valid bearer token is required.'));
+      try {
+        const deleted = await budgetRepository.delete(principal, request.params.budgetId);
+        return deleted ? reply.code(204).send() : reply.code(404).send(errorBody('NOT_FOUND', 'Budget not found.'));
+      } catch (error) {
+        if (error instanceof InvalidBudgetError) return reply.code(400).send(errorBody('INVALID_BUDGET', error.message));
+        return reply.code(503).send(errorBody('DATA_UNAVAILABLE', 'Budget storage is temporarily unavailable.'));
+      }
+    });
+  }
 
   return app;
 }
