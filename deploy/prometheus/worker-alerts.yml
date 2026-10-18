@@ -2,7 +2,7 @@ groups:
   - name: kubefin-worker
     rules:
       - alert: KubeFinWorkerTargetDown
-        expr: up{job="kubefin-worker"} == 0
+        expr: absent(up{job="kubefin-worker"}) or up{job="kubefin-worker"} == 0
         for: 2m
         labels:
           severity: warning

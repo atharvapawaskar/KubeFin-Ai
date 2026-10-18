@@ -15,7 +15,6 @@ WORKDIR /app
 COPY --from=build --chown=node:node /workspace/services/worker/package.json ./package.json
 COPY --from=build --chown=node:node /workspace/services/worker/node_modules ./node_modules
 COPY --from=build --chown=node:node /workspace/services/worker/dist/src ./dist/src
-COPY --from=build --chown=node:node /workspace/services/worker/scripts ./scripts
 
 USER node
 EXPOSE 3000 9090
