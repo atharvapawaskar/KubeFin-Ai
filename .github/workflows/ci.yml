@@ -195,6 +195,51 @@ jobs:
             fi
           done
 
+  # Exercise Redis Streams and MongoDB recovery against disposable real services.
+  validate-worker-integration:
+    name: Worker Reliability Integration
+    runs-on: ubuntu-latest
+    if: always()
+    needs: validate-structure
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      WORKER_INTEGRATION_MONGODB_URI: mongodb://127.0.0.1:27017/?directConnection=true
+      WORKER_INTEGRATION_REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: services/worker/.nvmrc
+          cache: npm
+          cache-dependency-path: services/worker/package-lock.json
+
+      - name: Install Worker dependencies
+        working-directory: services/worker
+        run: npm ci
+
+      - name: Run Worker reliability integration test
+        working-directory: services/worker
+        run: npm run test:integration
+
   # Validate the production container and Kubernetes chart.
   validate-deployment:
     name: Validate Deployment
@@ -222,6 +267,12 @@ jobs:
             --set kubernetesDiscovery.workloadLabelKey=kubefin.ai/workload \
             > /tmp/worker-discovery.yaml
           grep -q 'automountServiceAccountToken: false' /tmp/worker-default.yaml
+          grep -q 'readOnlyRootFilesystem: true' /tmp/worker-default.yaml
+          grep -q 'runAsNonRoot: true' /tmp/worker-default.yaml
+          grep -q 'allowPrivilegeEscalation: false' /tmp/worker-default.yaml
+          grep -q 'seccompProfile:' /tmp/worker-default.yaml
+          grep -q 'capabilities:' /tmp/worker-default.yaml
+          grep -Eq '^[[:space:]]+- ALL' /tmp/worker-default.yaml
           grep -q 'automountServiceAccountToken: true' /tmp/worker-discovery.yaml
           grep -q 'kind: ClusterRole' /tmp/worker-discovery.yaml
           ! grep -q 'kind: ClusterRole' /tmp/worker-default.yaml
@@ -238,7 +289,7 @@ jobs:
     name: CI Summary
     runs-on: ubuntu-latest
     if: always()
-    needs: [validate-structure, validate-contracts, validate-services, validate-deployment]
+    needs: [validate-structure, validate-contracts, validate-services, validate-worker-integration, validate-deployment]
     steps:
       - name: Report status
         run: |
@@ -246,6 +297,7 @@ jobs:
           echo "Structure: ${{ needs.validate-structure.result }}"
           echo "Contracts: ${{ needs.validate-contracts.result }}"
           echo "Services: ${{ needs.validate-services.result }}"
+          echo "Worker integration: ${{ needs.validate-worker-integration.result }}"
           echo "Deployment: ${{ needs.validate-deployment.result }}"
 
           if [[ "${{ needs.validate-structure.result }}" != "success" ]]; then
@@ -258,5 +310,8 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.validate-services.result }}" != "success" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs.validate-worker-integration.result }}" != "success" ]]; then
             exit 1
           fi

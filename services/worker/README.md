@@ -94,3 +94,16 @@ The CLI refuses to run if any daily aggregation window lacks a published generat
 - `@prometheus-io/client` supplies Prometheus metrics; the upstream project identifies it as the successor to the deprecated `prom-client` package.
 - The official MongoDB and Redis Node clients provide dependency connections and readiness pings.
 - TypeScript and Node's built-in test runner provide strict compilation and tests without an extra test framework.
+
+
+## Reliability checks and operations
+
+The runbook for deployment, recovery, DLQ handling, rollback, security checks, and cost reconciliation is [docs/RUNBOOK.md](docs/RUNBOOK.md). Run the Worker reliability integration test against disposable or explicitly provisioned MongoDB and Redis services with:
+
+```sh
+WORKER_INTEGRATION_MONGODB_URI='mongodb://127.0.0.1:27017/?directConnection=true' \
+WORKER_INTEGRATION_REDIS_URL='redis://127.0.0.1:6379' \
+npm run test:integration
+```
+
+The test creates a uniquely named temporary database and Redis streams and removes them after completion. Use isolated test services; do not point it at production data.

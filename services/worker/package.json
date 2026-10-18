@@ -14,7 +14,8 @@
     "costs:aggregate": "npm run build && node scripts/aggregate-costs.mjs",
     "start": "node dist/src/main.js",
     "test": "npm run build && node --test dist/test/*.test.js",
-    "recommendations:generate": "npm run build && node scripts/generate-recommendations.mjs"
+    "recommendations:generate": "npm run build && node scripts/generate-recommendations.mjs",
+    "test:integration": "npm run build && node --test dist/test/integration/*.test.js"
   },
   "dependencies": {
     "@prometheus-io/client": "0.16.1",
