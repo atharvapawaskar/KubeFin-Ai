@@ -1,6 +1,6 @@
-# Control Plane Analytics API
+# Control Plane Analytics and Budget API
 
-Member 3's Stage 5 API service. It implements the reviewed contract at `GET /api/v2/analytics/spend` and keeps the existing USD-only v1 contract unchanged.
+Member 3's Stage 5 analytics and Stage 6 budget API service. It implements `GET /api/v2/analytics/spend` and the proposed currency-aware `/api/v2/budgets` CRUD API. The budget v2 schema and OpenAPI document are proposals pending cross-member contract review; the existing USD-only budget v1 contract remains unchanged.
 
 ## Local setup
 
@@ -40,10 +40,19 @@ Do not set an empty or placeholder authentication value in a deployed environmen
 
 `/healthz` is liveness. `/readyz` pings MongoDB. Fastify request logging redacts authorization and query strings; error responses contain stable codes and do not expose database or token details.
 
+## Budget behavior (Stage 6 proposal)
+
+- Budget limits use positive exact decimal strings with up to 18 integer and 12 fractional digits, plus an explicit three-letter currency code. No FX conversion is performed.
+- Tenant identity is derived only from the verified JWT claim. Creating a budget requires a token scoped to exactly one tenant; list and read access are limited to the caller's tenant set.
+- Budget list pages use a bounded (1–100) page size and HMAC-signed cursors bound to the authorized tenant set. The same signing key configuration is used for analytics and budget cursors.
+- Current UTC daily/monthly spend is aggregated from processed raw usage events and reported with an as-of time. Unpriced or malformed priced records make the spend status `unknown`; spend is informational and can lag Gateway traffic.
+- Budget CRUD is isolated to v2 records with a currency field, preserving legacy v1 records. MongoDB enforces one budget per tenant/scope/currency/period.
+- The `enforcement` field is configuration only in this service. Gateway hard-limit behavior requires an agreed Redis counter contract and atomic reservation/settlement design; this API does not claim real-time enforcement.
+
 ## Identity integration
 
 The service verifies RS256 or ES256 JWTs against an HTTPS JWKS endpoint, checks issuer, audience, expiry and not-before, and derives authorized tenant IDs only from the configured claim. The identity provider must issue that claim with the documented string-or-array shape. Do not use a client-supplied tenant filter as authorization.
 
 ## Limits
 
-The service and API contract are implemented and unit tested. Live MongoDB aggregation, index creation, OIDC-provider integration, and dashboard integration need verification in the deployment environment. The local repository does not contain the Frontend application or a MongoDB fixture dataset.
+The analytics implementation has a reviewed contract. Budget v2 remains a cross-member proposal. Live MongoDB aggregation/index behavior, deployed OIDC tenant mapping, Gateway budget enforcement, and dashboard integration need verification in the deployment environment. The local repository does not contain the Frontend application or a MongoDB fixture dataset.
