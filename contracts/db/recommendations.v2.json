@@ -1,0 +1,260 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kubefin.local/contracts/db/recommendations.v2.json",
+  "title": "recommendations v2 (MongoDB collection)",
+  "description": "Currency-safe, evidence-bearing cost opportunities. Stage 8 emits evaluation candidates only; it does not claim model quality equivalence or automatically change routing. estimatedMonthlySavingsAmount is computed from exactly 30 UTC days of observed tokens and effective-dated pricing; no FX conversion is performed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "_id",
+    "schemaVersion",
+    "tenantId",
+    "ruleId",
+    "type",
+    "title",
+    "description",
+    "estimatedMonthlySavingsAmount",
+    "currency",
+    "affected",
+    "action",
+    "evidence",
+    "assumptions",
+    "createdAt"
+  ],
+  "properties": {
+    "_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "schemaVersion": {
+      "const": 2
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "ruleId": {
+      "type": "string",
+      "enum": [
+        "lower_cost_same_provider_model_evaluation_v1"
+      ]
+    },
+    "type": {
+      "const": "model"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "estimatedMonthlySavingsAmount": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Persist as MongoDB Decimal128. This is a 30-day observed-period difference in currency; no binary floating-point arithmetic is permitted."
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "affected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "workloadId",
+        "currentModel",
+        "candidateModel"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "workloadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "teamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "currentModel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "candidateModel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "kind": {
+          "const": "evaluate_model"
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observedFrom",
+        "observedTo",
+        "observedDays",
+        "requests",
+        "inputTokens",
+        "outputTokens",
+        "baselineCostAmount",
+        "candidateCostAmount",
+        "aggregationGenerations",
+        "pricingRecordIds"
+      ],
+      "properties": {
+        "observedFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "observedTo": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "observedDays": {
+          "const": 30
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "baselineCostAmount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Persist as MongoDB Decimal128."
+        },
+        "candidateCostAmount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Persist as MongoDB Decimal128."
+        },
+        "aggregationGenerations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 30,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "pricingRecordIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 62,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "examples": [
+    {
+      "_id": "rec2_7cc6ef2e3c0e58f5",
+      "schemaVersion": 2,
+      "tenantId": "acme",
+      "ruleId": "lower_cost_same_provider_model_evaluation_v1",
+      "type": "model",
+      "title": "Evaluate a lower-cost model for summarizer",
+      "description": "Applying the candidate model's effective rates to the observed 30-day token mix yields a lower estimated cost. Quality and latency have not been measured.",
+      "estimatedMonthlySavingsAmount": 120.5,
+      "currency": "INR",
+      "affected": {
+        "provider": "example-provider",
+        "workloadId": "summarizer",
+        "currentModel": "large-model",
+        "candidateModel": "small-model"
+      },
+      "action": {
+        "kind": "evaluate_model",
+        "from": "large-model",
+        "to": "small-model"
+      },
+      "evidence": {
+        "observedFrom": "2026-09-01T00:00:00Z",
+        "observedTo": "2026-10-01T00:00:00Z",
+        "observedDays": 30,
+        "requests": 1200,
+        "inputTokens": 2400000,
+        "outputTokens": 600000,
+        "baselineCostAmount": 400.5,
+        "candidateCostAmount": 280,
+        "aggregationGenerations": [
+          "c470e9f5-9d7f-4aa6-a12f-d88cc47102f3"
+        ],
+        "pricingRecordIds": [
+          "provider-large-inr",
+          "provider-small-inr"
+        ]
+      },
+      "assumptions": [
+        "The observed 30-day workload volume is representative of the next 30 days.",
+        "The candidate model has not been validated for equivalent quality or latency; run a controlled evaluation before switching."
+      ],
+      "createdAt": "2026-10-18T00:00:00Z"
+    }
+  ]
+}
