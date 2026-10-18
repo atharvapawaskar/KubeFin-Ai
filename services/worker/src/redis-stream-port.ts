@@ -85,6 +85,13 @@ export class RedisUsageStreamPort implements UsageStreamPort {
     await this.client.xAck(stream, group, entryId);
   }
 
+  async getLagMessages(stream: string, group: string): Promise<number | undefined> {
+    const groups = await this.client.xInfoGroups(stream);
+    const info = groups.find((candidate) => candidate.name === group);
+    if (!info || !Number.isSafeInteger(info.lag) || info.lag < 0) return undefined;
+    return info.lag;
+  }
+
   async deadLetterAndAcknowledge(
     stream: string,
     group: string,

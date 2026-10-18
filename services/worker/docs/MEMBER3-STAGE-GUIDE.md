@@ -1,6 +1,6 @@
 # Member 3 (Atharva) — Stage-by-Stage Guide
 
-This guide scopes the KubeFin AI roadmap to Member 3's Worker and DevOps responsibilities. It distinguishes checked-in configuration from future architecture plans. Shared contracts are owned by all members; the Stage 3 currency v2 proposal is PR #11, and this implementation is being developed on a dependent branch against that proposal.
+This guide scopes the KubeFin AI roadmap to Member 3's Worker and DevOps responsibilities. It distinguishes checked-in configuration from future architecture plans. Shared contracts are owned by all members; Stages 3 and 8 contracts and their Member 3 implementations have been merged.
 
 ## 1. Project context
 
@@ -41,15 +41,15 @@ The root `.env.example` includes MongoDB/Redis URLs, Worker stream settings, `PR
 
 ### Kubernetes, Helm, Prometheus, and other observability
 
-- `deploy/k8s/`, `deploy/helm/`, and `deploy/docker/` currently contain only `.gitkeep` placeholders.
-- There are no Kubernetes Deployments, Services, probes, ConfigMaps/Secrets templates, Helm values, HPA, or ingress resources in the repository.
-- There is no Prometheus configuration, ServiceMonitor, scrape annotation, Grafana dashboard, alert rule, Loki setup, or OpenTelemetry tracing setup.
-- The architecture document describes these as planned production capabilities, not as already deployed configuration.
-- The Worker exposes a metrics endpoint that a future Prometheus configuration can scrape; exposing `/metrics` alone does not configure Prometheus discovery or a dashboard.
+- `deploy/docker/worker.Dockerfile` builds a two-stage Node 24 Alpine image, runs as the unprivileged `node` user, and includes an HTTP health check. `.dockerignore` excludes VCS metadata, local dependencies, build output, credentials, and private keys.
+- `deploy/helm/worker/` deploys the Worker as a non-root Deployment with read-only root filesystem, dropped Linux capabilities, seccomp defaults, startup/liveness/readiness probes, a ClusterIP Service, bounded default resources, and references to an existing MongoDB/Redis Secret. No Secret contents, database, Redis, Ingress, or public endpoint are created.
+- Kubernetes workload discovery remains disabled by default. When explicitly enabled with the cluster ID and agreed label keys, Helm creates a ServiceAccount and read-only `list`/`watch` Pod-metadata ClusterRole binding.
+- `deploy/prometheus/worker-scrape.yml` provides annotation-based endpoint discovery, and `worker-alerts.yml` includes starting alerts for target availability, stream lag, dead-letter events, and processing duration. `ServiceMonitor`/Operator resources, dashboards, tracing, and Loki are not assumed.
+- The Worker metrics listener exposes event outcomes, processing duration, and sampled Redis consumer-group lag with bounded labels. Lag sampling is best-effort and does not block stream consumption.
 
 ### CI, contracts, and collaboration
 
-- `.github/workflows/ci.yml` checks repository structure, validates JSON contracts, and builds/tests the Worker.
+- `.github/workflows/ci.yml` checks repository structure, validates JSON contracts, builds/tests services, and has a deployment job that lints/renders the Helm chart and builds the Worker image.
 - `.github/CODEOWNERS` assigns Worker and deploy paths to Member 3. Shared contracts and architecture documentation involve all three members.
 - Contract workflow in `contracts/README.md` requires a contract-only PR. Stage 2 event, raw-event, and Redis contracts are merged; the Stage 3 currency-aware v2 proposal is open as PR #11. The owner authorized preparing the dependent implementation while the proposal is under review.
 - Current contracts include the Control Plane API, budgets, recommendations, Stage 2 usage-event and Redis definitions, and Stage 3 pricing v1. Cost aggregation is a later phase.
@@ -124,7 +124,7 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **Why:** The frontend should read governed API responses instead of accessing MongoDB directly.
 
-**Current implementation:** The API service, CI job, environment example, and docs are prepared for implementation review. Unit and injection tests cover query validation, currency separation, tenant isolation, JWT verification, signed cursors, readiness, and concurrency. Live MongoDB aggregations/index creation, deployed identity-provider configuration, dashboard integration, representative reconciliation, and latency measurements still need environment-backed verification.
+**Current implementation:** The contract and API implementation merged in PRs #17 and #18. Unit and injection tests cover query validation, currency separation, tenant isolation, JWT verification, signed cursors, readiness, and concurrency. Live MongoDB aggregations/index creation, deployed identity-provider configuration, dashboard integration, representative reconciliation, and latency measurements still need environment-backed verification.
 
 **Exit checks:** CI passes; API responses match the contract; token verification and tenant isolation are verified with the deployment's identity provider; sampled totals reconcile with active Stage 4 rollups; Member 2 integrates the endpoint; and query latency is measured against project goals.
 
@@ -132,45 +132,47 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 **What we are doing:** Enabling budget management and connecting budget state to Gateway enforcement.
 
-**How:** Use the approved budgets schema and API/Redis conventions; implement create/read/update flows and coordinate enforcement behavior with Member 1 and the budget UI with Member 2. Cover threshold and exceeded-budget behavior end-to-end.
+**How:** Preserve the legacy USD-only budget v1 interface. PR #20 merged the currency-aware v2 budget schema; PR #22 merged the API with exact decimal-string limits and tenant ownership from verified OIDC claims. Current UTC-period spend is calculated from processed raw events and includes an unpriced-event count; it is informational and can lag Gateway traffic. Coordinate real-time Redis enforcement counters with Member 1 and the budget UI with Member 2. Do not derive hard-limit decisions from published cost rollups; those are rebuildable snapshots, not real-time counters.
 
 **Why:** Spend visibility helps explain usage; budgets help teams act before or when limits are reached.
 
-**Exit checks:** Budget state is persisted and visible through the API/UI, and Gateway behavior for within-limit and exceeded requests matches the agreed contract.
+**Exit checks:** Member 3's API/contract portion is merged. End-to-end Stage 6 still requires Gateway behavior for within-limit/exceeded requests and Member 2 dashboard integration.
 
 ### Stage 7 — Kubernetes workload discovery and identity enrichment
 
-**What we are doing:** Discovering Kubernetes Pods and maintaining a metadata inventory that can support consistent tenant, team, and workload attribution.
+**What we are doing:** Discovering workloads and associating usage with their Kubernetes identity and metadata.
 
-**How:** The Worker uses projected ServiceAccount credentials over verified HTTPS, obtains a bounded paginated Pod snapshot, then maintains it with incremental watch events and bookmark-based resource-version recovery. Only configured label values map to the existing `tenantId`, `teamId`, and `workloadId` fields; arbitrary labels and pod specs are not stored. Discovery is disabled by default and requires an explicit cluster ID and label-key configuration. A read-only ClusterRole grants only Pod list/watch. Do not alter shared event or raw-event contracts or treat inventory as Gateway attribution until Member 1 confirms the same label mapping.
+**How:** Agree the ServiceAccount and identity-label mapping with Gateway and platform stakeholders. The Worker can independently build a read-only Pod inventory using the in-cluster API and a least-privilege `list pods` role. Configured Kubernetes label values map only to the existing `tenantId`, `teamId`, and `workloadId` event fields. Do not change shared event or raw-event contracts or enrich persisted usage until Member 1 confirms the mapping.
 
 **Why:** Workload attribution makes spend actionable without manual mapping for every deployment.
 
-**Current status:** The Member 3 Worker discovery implementation and RBAC role are prepared in this PR. The project has not selected a cluster-wide label convention, bound the role to the actual Worker ServiceAccount, or verified discovery on a live cluster. Gateway event attribution and shared mapping confirmation remain cross-member integration work.
+**Exit checks:** A test workload is discovered, its identity is mapped consistently into usage data, and access permissions are limited to required Kubernetes resources.
 
-**Exit checks:** The Gateway and Worker use an agreed identity mapping, a test workload is discovered and appears in usage attribution, RBAC is bound and verified as least privilege, and live recovery behavior is checked in a Kubernetes/MongoDB environment.
+**Implementation status:** Member 3 discovery groundwork merged in PR #23. It does not yet have a deployment-specific ClusterRoleBinding, a reviewed label convention, live cluster verification, or Gateway event integration. Therefore Stage 7 is not complete end to end.
 
-### Stage 8 — Recommendations — IMPLEMENTATION PR OPEN
+### Stage 8 — Recommendations
 
-**What we are doing:** Generating explainable model evaluation candidates from a complete 30-day workload history and exposing them through the authenticated Control Plane API.
+**What we are doing:** Generating explainable cost/performance optimization recommendations from usage and aggregation data.
 
-**How:** Contract PR #24 is merged. The Worker compares only same-provider, same-currency model rates over 30 complete UTC daily windows with published generations, explicit workload identity, and fully priced usage. Any attributed unpriced usage suppresses a recommendation for that workload/model. Exact Decimal128 savings include source generation IDs, pricing record IDs, and assumptions. A dry-run CLI previews results; `--apply` is required to upsert. The API derives tenant scope from the verified principal, keeps currencies separate, and uses bounded signed-cursor pagination. Suggestions require a controlled quality/latency evaluation before a model change; no routing is automatic.
+**How:** Start with explicit deterministic rules and the reviewed recommendation contract. The initial safe rule can identify same-provider lower-cost model evaluation candidates using a complete 30-day usage window, effective prices, and explicit workload identity. Record evidence and assumptions with exact currency-specific savings. Do not claim quality or latency equivalence without measured evidence; do not change Gateway routing automatically. Expose tenant-scoped results through the Control Plane API for Member 2's UI.
 
-**Why:** Historical usage can surface lower-cost candidates while preserving reproducible evidence and avoiding unsupported quality claims.
+**Why:** Recommendations turn historical spend data into possible actions while keeping estimates understandable.
 
-**Current implementation:** Prepared on `m3/stage8-recommendations`; the implementation PR is ready for review. Worker build and 58 tests, Control Plane build and 6 tests, 10 contract schemas/examples, CLI syntax, and whitespace checks passed locally.
+**Exit checks:** The shared contract is reviewed; each recommendation has evidence, assumptions, currency, and a reproducible exact savings estimate; tenant-scoped API responses pass tests; Member 2 integrates the UI; real rollups and prices are reconciled; unsupported recommendations are not presented as facts.
 
-**Exit checks:** Merge after review and CI; reconcile against real MongoDB generations and approved rates; integrate the endpoint with Member 2's dashboard; decide scheduling and stale-result handling. Live database and dashboard integration have not been run here.
+**Current implementation:** Contract proposal PR #24 defines an evidence-bearing currency-safe v2 and authenticated `/api/v2/recommendations` API shape. The Worker candidate implementation requires exactly 30 published daily windows, explicit workload attribution, same-provider and same-currency candidate rates covering every observed day, and positive savings. It writes preview output by default and only upserts with `--apply`. The Control Plane has tenant-scoped reads, exact Decimal128 sorting/serialization, and signed pagination. Only the model-evaluation rule is implemented; quality and latency are not inferred from token usage.
+
+**Open gates:** PR #24 requires both other members' review before merge. Worker and Control Plane integration against live MongoDB and the dashboard is still required. The CLI is an operator-triggered job until a schedule and stale-recommendation policy are approved.
 
 ### Stage 9 — Deployment and observability
 
 **What we are doing:** Packaging and deploying the Worker and related KubeFin services, then making runtime health and performance visible.
 
-**How:** Add a Worker Dockerfile and local Compose profile only after agreeing which services Compose should run. Add Kubernetes Deployment/Service/probes/configuration, Helm chart and values, resource requests/limits, and scaling after the workload shape is understood. Configure Prometheus discovery/scraping for the Worker metrics endpoint; add Worker metrics for event lag, processing duration, successes, retries, and DLQ counts with low-cardinality labels. Add dashboards/alerts and tracing/log correlation where the team has selected the stack.
+**How:** Build the Worker image with a multi-stage Dockerfile. Deploy it with the Helm chart's hardened Deployment, ClusterIP Service, health probes, existing Secret references, resource defaults, and opt-in discovery RBAC. Keep Compose limited to MongoDB and Redis because the repository CI currently enforces that service boundary. Configure Prometheus scraping and alerts; expose sampled stream lag, processing duration, event outcomes, retries, and dead-letter counts with bounded labels. Set production image, secrets, cluster label convention, resource sizing, and replica count from the target environment and measured workload.
 
 **Why:** A working local process is not yet a deployable, monitorable service. Operators need to know whether the Worker is healthy, falling behind, or routing events to the DLQ.
 
-**Exit checks:** Deployment is reproducible; probes reflect readiness; Prometheus can scrape the Worker; metrics and alerts expose queue lag and processing failures; logs contain no payload/PII/secrets.
+**Exit checks:** Deployment is reproducible; probes reflect readiness; CI lints and renders default and discovery-enabled charts and builds the image; Prometheus can scrape the Worker; metrics and alerts expose queue lag and processing failures; logs contain no payload/PII/secrets. Actual cluster rollout, dependency connectivity, and Prometheus scrape must still be verified in an equipped environment.
 
 ### Stage 10 — Reliability, security, and final integration
 
@@ -194,8 +196,8 @@ Stages are dependency-driven. The completion checks below are the exit gates; do
 
 ## 5. Immediate next actions
 
-1. Review and merge the Stage 5 Control Plane API implementation.
-2. Configure real OIDC settings and verify tenant isolation with valid and invalid tokens.
-3. Run representative API ranges against MongoDB and reconcile each currency/status group with published Stage 4 rollups.
-4. Integrate the endpoint with Member 2's dashboard and measure query latency.
-5. Configure cluster-wide rate limiting at the ingress or API gateway; the service's concurrency cap is process-local.
+1. Review and merge the focused Stage 9 deployment and observability PR after its CI completes.
+2. Build/push an immutable Worker image to the team's registry and create the pre-provisioned MongoDB/Redis Secret in the target namespace.
+3. Confirm the Kubernetes label convention and least-privilege scope before enabling workload discovery.
+4. Install the chart in a non-production cluster, verify probes and readiness against real dependencies, and confirm Prometheus scrapes the metrics Service and evaluates the alert rules.
+5. Measure CPU, memory, throughput, and lag under representative load before changing replicas, resources, or alert thresholds; capture remaining cross-member integration work for Stage 10.

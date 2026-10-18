@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createMetricsRegistry, createMetricsServer, createUsageEventCounter } from '../src/metrics.js';
+import {
+  createMetricsRegistry,
+  createMetricsServer,
+  createUsageEventCounter,
+  createUsageEventProcessingDuration,
+  createUsageStreamLagGauge,
+} from '../src/metrics.js';
 
 test('registers bounded-label counters for usage event outcomes', async () => {
   const registry = createMetricsRegistry();
@@ -13,6 +19,17 @@ test('registers bounded-label counters for usage event outcomes', async () => {
   assert.match(body, /worker_usage_events_total\{outcome="inserted"\} 1/);
   assert.match(body, /worker_usage_events_total\{outcome="dead_lettered"\} 1/);
   assert.match(body, /worker_usage_events_total\{outcome="unpriced"\} 1/);
+});
+
+test('exports bounded-cardinality processing duration and consumer group lag metrics', async () => {
+  const registry = createMetricsRegistry();
+  createUsageEventProcessingDuration(registry).observe(0.25);
+  createUsageStreamLagGauge(registry).set(12);
+  const body = await registry.metrics();
+  assert.match(body, /worker_usage_event_processing_duration_seconds_bucket\{le="0.5"\} 1/);
+  assert.match(body, /worker_usage_stream_lag_messages 12/);
+  const workerMetrics = body.split('\n').filter((line) => line.startsWith('worker_')).join('\n');
+  assert.doesNotMatch(workerMetrics, /tenantId|workloadId|model|provider/);
 });
 
 test('serves Prometheus metrics only from the metrics listener path', async () => {

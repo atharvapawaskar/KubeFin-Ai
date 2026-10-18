@@ -1,15 +1,18 @@
 # Worker and Control Plane State
 
 ## Current task
-Stage 7 Kubernetes workload discovery groundwork.
+Stage 9 Member 3 deployment and observability. Stage 8 contract and implementation are merged in PRs #24 and #25; Stage 7 discovery is merged in PR #23.
 
 ## Stage status
 - Stage 1 Worker startup foundation: merged in PR #3.
 - Stage 2 Redis Streams consumer, validation, idempotent persistence, and DLQ: merged in PRs #7 and #8.
 - Stage 3 currency-aware pricing contracts and Worker implementation: merged in PRs #11 and #13; state follow-up merged in PR #14.
 - Stage 4 rollup contracts and Worker aggregation: merged in PRs #15 and #16. PR #16 CI passed.
-- Stage 5 currency-safe analytics API contract: merged in PR #17. The Control Plane API implementation is prepared for review.
-- Stage 6 currency-aware budget contract and Control Plane API: merged in PRs #20 and #22. Gateway enforcement and dashboard integration remain Member 1 and Member 2 work.
+- Stage 5 currency-safe analytics API contract and Control Plane implementation: merged in PRs #17 and #18.
+- Stage 6 currency-aware budget contract and Control Plane API implementation: merged in PRs #20 and #22. Gateway enforcement and dashboard integration remain other-member work.
+- Stage 7 opt-in Kubernetes workload discovery: merged in PR #23.
+- Stage 8 recommendations contract and implementation: merged in PRs #24 and #25; live data reconciliation and dashboard integration remain outstanding.
+- Stage 9 Worker container, Helm deployment, and Prometheus assets: implementation prepared for review; CI and target-cluster rollout checks are pending.
 
 ## Stage 5 implementation
 - Adds `services/control-plane/` with `GET /api/v2/analytics/spend`; keeps the USD-only v1 contract unchanged.
@@ -35,7 +38,7 @@ Stage 7 Kubernetes workload discovery groundwork.
 - Adds proposed `budgets.v2.json` and `control-plane-budgets.v2.yaml`: positive exact decimal-string limits plus three-letter currency codes, with tenant scope derived from the verified OIDC principal. Keeps legacy budgets v1 unchanged.
 - Implements authenticated create/list/read/update/delete routes at `/api/v2/budgets`, tenant-scoped MongoDB access, a unique scope/currency/period index, bounded signed-cursor pagination, and current daily/monthly spend reporting from raw usage events. Responses include unpriced-event count, spend status, and an as-of timestamp.
 - Current-period spend is informational processed usage and can lag Gateway traffic. It does not implement hard enforcement. Gateway enforcement still needs a reviewed Redis counter/key contract plus atomic reservation/settlement semantics with Member 1. Dashboard integration is owned by Member 2.
-- The budget v2 contract was merged in PR #20, and the dependent API implementation was merged in PR #22.
+- The budget v2 contract was merged in PR #20; the dependent Control Plane API implementation was merged in PR #22.
 
 ## Stage 6 verification and exit blockers
 - Control Plane `npm test` passes, including budget route/auth/pagination and repository tests for tenant scoping, signed cursors, exact decimal spend, and unknown pricing.
@@ -44,16 +47,24 @@ Stage 7 Kubernetes workload discovery groundwork.
 
 ## Stage 7 Member 3 implementation status
 - Added opt-in Kubernetes Pod inventory to the Worker. It uses the in-cluster HTTPS API, projected ServiceAccount token and CA, TLS verification, bounded paginated snapshots, incremental watches with bookmark resume, and relists after resource-version expiry. It stores a MongoDB `kubernetes_workloads` inventory keyed by cluster ID, namespace, and Pod UID.
-- Added a read-only ClusterRole with `list` and `watch` access to Pods. The role must be bound to the actual Worker ServiceAccount in deployment configuration; no namespace/service-account naming assumption has been made.
 - Only configured tenant/team/workload label values, Pod identity, and owner references are persisted. The Worker requests Kubernetes partial object metadata and does not alter the shared usage-event or raw-event schemas.
-- Discovery is disabled by default. Enabling it requires a deployment cluster ID, the three identity label keys, and in-cluster or explicitly configured API host. Deleted Pods are marked inactive; the bounded 100,000-Pod snapshot is repeated only when watch recovery requires a relist.
-- Stage 7 is not complete end to end: the team has not agreed on a cluster-wide label convention; Member 1 has not confirmed that the Gateway derives the existing event identity fields from the same labels; RBAC binding and live cluster verification remain pending. Large deployments may require namespace-scoped watches.
-- Verification this turn: Worker TypeScript build and `git diff --check` passed locally. Automated tests and live Kubernetes/MongoDB integration were not run.
+- Added a read-only ClusterRole with `list` and `watch` access to Pods. The role must be bound to the actual Worker ServiceAccount in deployment configuration; no namespace/service-account naming assumption has been made.
+- Discovery is disabled by default. Enabling it requires a deployment cluster ID, the three identity label keys, and in-cluster or explicitly configured API host. Deleted Pods are marked inactive; the bounded 100,000-Pod snapshot is only repeated when watch recovery requires a relist.
+- Stage 7 code merged in PR #23. End-to-end attribution still needs an agreed cluster-wide label convention, Member 1 confirmation that Gateway identity fields use the same mapping, an RBAC binding to the deployed Worker ServiceAccount, and live cluster/MongoDB verification. Large deployments may require namespace-scoped watches.
+- PR #23 CI run #42 passed Worker and Control Plane builds/tests plus contract/structure checks. Local Worker build and `git diff --check` passed. Live Kubernetes/MongoDB integration was not run because no configured cluster or database was available.
 
 ## Stage 8 Member 3 recommendations implementation
+- Existing `recommendations.v1.json` and `/api/v1/recommendations` are USD-only and have no structured evidence or assumptions. They do not match Stage 3/4 multi-currency data or Stage 8's reproducible-estimate exit checks.
+- Contract PR #24 adds `recommendations.v2.json` and the authenticated, tenant-scoped `/api/v2/recommendations` API shape. It keeps v1 unchanged.
+- The Worker implementation in this worktree adds one deterministic rule: same-provider lower-cost model evaluation for an attributed workload over exactly 30 complete UTC daily windows. It requires active rollup generations and candidate rates that cover every observed day, compares only within the same currency, stores Decimal128 amounts, and records generation/rate evidence and assumptions. It does not claim quality or latency equivalence, switch models, or emit provider/cache recommendations without evidence.
+- The Worker CLI previews by default and only upserts on explicit `--apply`. The Control Plane implementation adds an authenticated, tenant-scoped, currency-separated, Decimal128-ranked API with bounded signed cursors.
+- Worker TypeScript build and all 57 Worker tests passed (including lifecycle/metrics tests after allowing loopback binds). Control Plane TypeScript build and all 6 tests passed. Local contract validation passed for the 10 existing JSON schemas; PR #24 CI passed the proposed schema, OpenAPI, service, and structure checks. No live MongoDB integration or dashboard integration was run.
+- Stage 8 implementation merged in PR #25. Live MongoDB rollup/rate reconciliation and Member 2 dashboard integration remain outstanding; scheduling and recommendation-retention policy also remain deployment decisions.
 
-- Contract PR #24, including currency-safe evidence-bearing recommendations v2 and the tenant-scoped API shape, is merged.
-- The implementation branch `m3/stage8-recommendations` adds a deterministic same-provider model evaluation rule requiring a complete 30-day window, active daily generations, explicit workload attribution, same-currency price coverage, positive exact savings, and no unpriced usage for the attributed workload/model.
-- The Worker previews by default and writes only with explicit `--apply`; persisted evidence identifies source generations and candidate pricing records. The Control Plane exposes authenticated tenant-scoped reads with currency-separated results and signed bounded pagination.
-- Worker build and 58 tests passed; Control Plane build and all 6 tests passed; 10 JSON contract schemas/examples, CLI syntax, and whitespace checks passed.
-- Live MongoDB reconciliation and Member 2 dashboard integration remain unverified. Scheduling and stale recommendation handling remain deployment decisions.
+## Stage 9 Member 3 deployment and observability
+- Added a multi-stage Node 24 Alpine Worker image. The runtime runs as the unprivileged Node user, contains production dependencies and built Worker files only, exposes separate application and metrics ports, and has a `/healthz` container health check. `.dockerignore` excludes local dependencies, build output, credentials, and repository metadata.
+- Added a Helm chart with a hardened Deployment, startup/liveness/readiness probes, ClusterIP Service, bounded default resources, existing MongoDB/Redis Secret references, and discovery-disabled-by-default behavior. When discovery is enabled, Helm requires the cluster ID and three label keys, enables the ServiceAccount token, and grants only Pod `list`/`watch` RBAC.
+- Added Prometheus annotation-based endpoint discovery and alert rules for scrape availability, stream lag, dead-letter events, and processing latency. Worker metrics now include sampled consumer-group lag and per-event processing duration alongside outcome counters; labels remain bounded.
+- Root Compose remains limited to MongoDB and Redis per the existing repository CI constraint. No production registry, credentials, namespace label convention, replica target, or public endpoint was invented.
+- Worker `npm test` passed all 60 tests; `npm run validate:contracts` validated all 10 schemas/examples; Helm chart values and Prometheus YAML files parsed locally; `git diff --check` passed. Local Helm validation is unavailable because Helm is not installed. Docker image build could not run because no Docker daemon is running. GitHub CI now lints/renders default and discovery-enabled Helm templates and builds the image.
+- No live Kubernetes, MongoDB, Redis, or Prometheus integration was available. Stage 9 requires CI to pass, then a non-production cluster rollout to verify image pull, real dependency connectivity, readiness, RBAC behavior if discovery is enabled, scrape health, and alert evaluation.

@@ -5,7 +5,13 @@ import { MongoClient } from 'mongodb';
 import { createClient } from 'redis';
 import { buildHealthApp } from './app.js';
 import { parseConfig } from './config.js';
-import { createMetricsRegistry, createMetricsServer, createUsageEventCounter } from './metrics.js';
+import {
+  createMetricsRegistry,
+  createMetricsServer,
+  createUsageEventCounter,
+  createUsageEventProcessingDuration,
+  createUsageStreamLagGauge,
+} from './metrics.js';
 import { RedisUsageStreamPort } from './redis-stream-port.js';
 import { MongoPricingCatalog } from './pricing-catalog.js';
 import { MongoUsageEventStore } from './usage-event-store.js';
@@ -48,11 +54,15 @@ async function main(): Promise<void> {
   );
   const registry = createMetricsRegistry();
   const usageEventCounter = createUsageEventCounter(registry);
+  const usageEventProcessingDuration = createUsageEventProcessingDuration(registry);
+  const usageStreamLag = createUsageStreamLagGauge(registry);
   const consumer = new UsageStreamConsumer({
     stream,
     sink: eventStore,
     logger: app.log,
     onOutcome: (outcome) => usageEventCounter.inc({ outcome }),
+    onProcessingDuration: (seconds) => usageEventProcessingDuration.observe(seconds),
+    onStreamLag: (messages) => usageStreamLag.set(messages),
     config: {
       stream: config.REDIS_USAGE_STREAM,
       group: config.REDIS_USAGE_GROUP,

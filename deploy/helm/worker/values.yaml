@@ -1,0 +1,62 @@
+replicaCount: 1
+image:
+  repository: kubefin-worker
+  tag: local
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+service:
+  type: ClusterIP
+  annotations: {}
+  appPort: 3000
+  metricsPort: 9090
+metrics:
+  scrapeAnnotations: true
+secrets:
+  existingSecret: kubefin-worker-runtime
+  mongoUriKey: MONGODB_URI
+  redisUrlKey: REDIS_URL
+worker:
+  pricingCurrency: INR
+  stream: usage-events
+  group: kubefin-worker-v1
+  batchSize: 10
+  blockMs: 5000
+  claimIdleMs: 30000
+  maxDeliveries: 5
+  maxEventBytes: 262144
+kubernetesDiscovery:
+  enabled: false
+  clusterId: ""
+  tenantLabelKey: ""
+  teamLabelKey: ""
+  workloadLabelKey: ""
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  capabilities:
+    drop: [ALL]
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+terminationGracePeriodSeconds: 45
+nodeSelector: {}
+tolerations: []
+affinity: {}

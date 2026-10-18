@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { processDelivery, type EventValidation } from './process-delivery.js';
 import { usageEventSchema, type UsageEvent } from './usage-event.js';
 
@@ -44,6 +45,7 @@ export interface UsageStreamPort {
     entryId: string,
     record: DeadLetterRecord,
   ): Promise<void>;
+  getLagMessages?(stream: string, group: string): Promise<number | undefined>;
 }
 
 export interface UsageEventSink {
@@ -72,6 +74,8 @@ export interface UsageStreamConsumerDependencies {
   logger: ConsumerLogger;
   config: UsageStreamConsumerConfig;
   onOutcome?: (outcome: 'inserted' | 'duplicate' | 'unpriced' | 'dead_lettered' | 'retrying') => void;
+  onProcessingDuration?: (seconds: number) => void;
+  onStreamLag?: (messages: number) => void;
 }
 
 export class UsageStreamConsumer {
@@ -81,6 +85,7 @@ export class UsageStreamConsumer {
     const { config, stream } = this.dependencies;
     await stream.createGroup(config.stream, config.group);
     let claimCursor = '0-0';
+    let lastLagSampleAt = 0;
 
     while (!signal.aborted) {
       try {
@@ -105,6 +110,17 @@ export class UsageStreamConsumer {
           );
         }
 
+        const now = Date.now();
+        if (this.dependencies.onStreamLag && stream.getLagMessages && now - lastLagSampleAt >= 10_000) {
+          lastLagSampleAt = now;
+          try {
+            const lag = await stream.getLagMessages(config.stream, config.group);
+            if (lag !== undefined && Number.isSafeInteger(lag) && lag >= 0) this.dependencies.onStreamLag(lag);
+          } catch {
+            // Metrics must not prevent event processing when Redis lacks lag metadata.
+          }
+        }
+
         claimCursor = claimed.nextId;
         if (claimCursor !== '0-0') continue;
 
@@ -127,6 +143,16 @@ export class UsageStreamConsumer {
   }
 
   private async processEntry(entry: StreamEntry): Promise<void> {
+    const startedAt = performance.now();
+    try {
+      await this.processEntryInternal(entry);
+    } finally {
+      const seconds = (performance.now() - startedAt) / 1_000;
+      if (Number.isFinite(seconds) && seconds >= 0) this.dependencies.onProcessingDuration?.(seconds);
+    }
+  }
+
+  private async processEntryInternal(entry: StreamEntry): Promise<void> {
     const { config, stream, sink, logger } = this.dependencies;
     const rawPayload = entry.fields.payload;
     let persisted = false;

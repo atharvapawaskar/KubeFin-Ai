@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubefin-worker.fullname" . }}
+  labels:
+    {{- include "kubefin-worker.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "kubefin-worker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "kubefin-worker.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "kubefin-worker.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.kubernetesDiscovery.enabled }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.appPort }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.service.metricsPort }}
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: {{ .Values.service.appPort | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.service.metricsPort | quote }}
+            - name: PRICING_CURRENCY
+              value: {{ .Values.worker.pricingCurrency | quote }}
+            - name: REDIS_USAGE_STREAM
+              value: {{ .Values.worker.stream | quote }}
+            - name: REDIS_USAGE_GROUP
+              value: {{ .Values.worker.group | quote }}
+            - name: WORKER_BATCH_SIZE
+              value: {{ .Values.worker.batchSize | quote }}
+            - name: WORKER_BLOCK_MS
+              value: {{ .Values.worker.blockMs | quote }}
+            - name: WORKER_CLAIM_IDLE_MS
+              value: {{ .Values.worker.claimIdleMs | quote }}
+            - name: WORKER_MAX_DELIVERIES
+              value: {{ .Values.worker.maxDeliveries | quote }}
+            - name: WORKER_MAX_EVENT_BYTES
+              value: {{ .Values.worker.maxEventBytes | quote }}
+            - name: KUBERNETES_DISCOVERY_ENABLED
+              value: {{ .Values.kubernetesDiscovery.enabled | quote }}
+            {{- if .Values.kubernetesDiscovery.enabled }}
+            - name: KUBERNETES_CLUSTER_ID
+              value: {{ required "kubernetesDiscovery.clusterId is required when discovery is enabled" .Values.kubernetesDiscovery.clusterId | quote }}
+            - name: KUBERNETES_TENANT_LABEL_KEY
+              value: {{ required "kubernetesDiscovery.tenantLabelKey is required when discovery is enabled" .Values.kubernetesDiscovery.tenantLabelKey | quote }}
+            - name: KUBERNETES_TEAM_LABEL_KEY
+              value: {{ required "kubernetesDiscovery.teamLabelKey is required when discovery is enabled" .Values.kubernetesDiscovery.teamLabelKey | quote }}
+            - name: KUBERNETES_WORKLOAD_LABEL_KEY
+              value: {{ required "kubernetesDiscovery.workloadLabelKey is required when discovery is enabled" .Values.kubernetesDiscovery.workloadLabelKey | quote }}
+            {{- end }}
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret must name a pre-created Secret" .Values.secrets.existingSecret | quote }}
+                  key: {{ .Values.secrets.mongoUriKey | quote }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret must name a pre-created Secret" .Values.secrets.existingSecret | quote }}
+                  key: {{ .Values.secrets.redisUrlKey | quote }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
