@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createControlPlaneApp } from '../src/app.js';
 import type { Authenticator, Principal } from '../src/auth.js';
 import type { MongoAnalyticsRepository } from '../src/analytics.js';
+import type { MongoBudgetRepository } from '../src/budgets.js';
 
 const okPrincipal: Principal = { subject: 'user-a', tenantIds: ['tenant-a'] };
 
@@ -75,5 +76,31 @@ test('limits concurrent analytics requests', async () => {
   release?.();
   await first;
   assert.equal(second.statusCode, 429);
+  await app.close();
+});
+
+test('budget API authenticates requests, validates pagination, and returns a page', async () => {
+  const authenticator: Authenticator = { authenticate: async (header) => header === 'Bearer valid' ? okPrincipal : null };
+  const queries: unknown[] = [];
+  const budgets = {
+    list: async (_principal: Principal, query: unknown) => {
+      queries.push(query);
+      return { items: [], nextCursor: null };
+    },
+  } as unknown as MongoBudgetRepository;
+  const app = createControlPlaneApp({
+    authenticator,
+    repository: { spend: async () => ({}) } as unknown as MongoAnalyticsRepository,
+    budgets,
+    checkReady: async () => undefined,
+  });
+  const unauthenticated = await app.inject({ method: 'GET', url: '/api/v2/budgets' });
+  assert.equal(unauthenticated.statusCode, 401);
+  const invalid = await app.inject({ method: 'GET', url: '/api/v2/budgets?pageSize=101', headers: { authorization: 'Bearer valid' } });
+  assert.equal(invalid.statusCode, 400);
+  const result = await app.inject({ method: 'GET', url: '/api/v2/budgets?pageSize=20', headers: { authorization: 'Bearer valid' } });
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(JSON.parse(result.body), { items: [], nextCursor: null });
+  assert.deepEqual(queries, [{ pageSize: 20 }]);
   await app.close();
 });
