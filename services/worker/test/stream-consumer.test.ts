@@ -28,6 +28,7 @@ class FakeStream implements UsageStreamPort {
   claimed: StreamEntry[] = [];
   fresh: StreamEntry[] = [];
   abortOnRead?: AbortController;
+  async getLagMessages(): Promise<number | undefined> { return 17; }
 
   async createGroup(): Promise<void> {
     this.calls.push('create-group');
@@ -73,7 +74,7 @@ async function runOnce(options: {
   persist?: (event: UsageEvent) => Promise<'inserted' | 'duplicate' | 'unpriced'>;
   deliveries?: number;
   maxPayloadBytes?: number;
-}): Promise<{ stream: FakeStream; logMessages: string[]; outcomes: string[] }> {
+}): Promise<{ stream: FakeStream; logMessages: string[]; outcomes: string[]; durations: number[]; lags: number[] }> {
   const stream = new FakeStream();
   const controller = new AbortController();
   stream.claimed = [options.entry];
@@ -81,10 +82,14 @@ async function runOnce(options: {
   stream.pendingDeliveries = options.deliveries ?? 1;
   const logMessages: string[] = [];
   const outcomes: string[] = [];
+  const durations: number[] = [];
+  const lags: number[] = [];
   const consumer = new UsageStreamConsumer({
     stream,
     sink: { persistIdempotently: options.persist ?? (async () => 'inserted') },
     onOutcome: (outcome) => outcomes.push(outcome),
+    onProcessingDuration: (seconds) => durations.push(seconds),
+    onStreamLag: (messages) => lags.push(messages),
     logger: {
       warn: (_fields, message) => logMessages.push(message),
       error: (_fields, message) => logMessages.push(message),
@@ -101,15 +106,18 @@ async function runOnce(options: {
     },
   });
   await consumer.run(controller.signal);
-  return { stream, logMessages, outcomes };
+  return { stream, logMessages, outcomes, durations, lags };
 }
 
 test('recovers a pending event and persists before acknowledgement', async () => {
-  const { stream, outcomes } = await runOnce({ entry: { id: '1-0', fields: { payload: JSON.stringify(event) } } });
+  const { stream, outcomes, durations, lags } = await runOnce({ entry: { id: '1-0', fields: { payload: JSON.stringify(event) } } });
   assert.deepEqual(stream.calls.slice(0, 3), ['create-group', 'claim:0-0', 'ack']);
   assert.deepEqual(stream.acknowledged, ['1-0']);
   assert.equal(stream.deadLetters.length, 0);
   assert.deepEqual(outcomes, ['inserted']);
+  assert.equal(durations.length, 1);
+  assert.ok((durations[0] ?? -1) >= 0);
+  assert.deepEqual(lags, [17]);
 });
 
 test('moves an invalid event to the DLQ by digest before acknowledging it without retaining payloads', async () => {

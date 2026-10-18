@@ -61,6 +61,7 @@ jobs:
             "deploy/docker"
             "deploy/helm"
             "deploy/k8s"
+            "deploy/prometheus"
             ".github/workflows"
           )
           for d in "${required_dirs[@]}"; do
@@ -194,12 +195,50 @@ jobs:
             fi
           done
 
+  # Validate the production container and Kubernetes chart.
+  validate-deployment:
+    name: Validate Deployment
+    runs-on: ubuntu-latest
+    if: always()
+    needs: validate-structure
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+
+      - name: Lint Helm chart
+        run: helm lint deploy/helm/worker
+
+      - name: Render default and discovery-enabled charts
+        run: |
+          helm template kubefin deploy/helm/worker --namespace kubefin > /tmp/worker-default.yaml
+          helm template kubefin deploy/helm/worker --namespace kubefin \
+            --set kubernetesDiscovery.enabled=true \
+            --set kubernetesDiscovery.clusterId=cluster-example \
+            --set kubernetesDiscovery.tenantLabelKey=kubefin.ai/tenant \
+            --set kubernetesDiscovery.teamLabelKey=kubefin.ai/team \
+            --set kubernetesDiscovery.workloadLabelKey=kubefin.ai/workload \
+            > /tmp/worker-discovery.yaml
+          grep -q 'automountServiceAccountToken: false' /tmp/worker-default.yaml
+          grep -q 'automountServiceAccountToken: true' /tmp/worker-discovery.yaml
+          grep -q 'kind: ClusterRole' /tmp/worker-discovery.yaml
+          ! grep -q 'kind: ClusterRole' /tmp/worker-default.yaml
+          if helm template kubefin deploy/helm/worker --set kubernetesDiscovery.enabled=true >/dev/null 2>&1; then
+            echo "Discovery must reject missing cluster and label configuration"
+            exit 1
+          fi
+
+      - name: Build Worker container image
+        run: docker build --file deploy/docker/worker.Dockerfile --tag kubefin-worker:ci .
+
   # Summary
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
     if: always()
-    needs: [validate-structure, validate-contracts, validate-services]
+    needs: [validate-structure, validate-contracts, validate-services, validate-deployment]
     steps:
       - name: Report status
         run: |
@@ -207,7 +246,17 @@ jobs:
           echo "Structure: ${{ needs.validate-structure.result }}"
           echo "Contracts: ${{ needs.validate-contracts.result }}"
           echo "Services: ${{ needs.validate-services.result }}"
+          echo "Deployment: ${{ needs.validate-deployment.result }}"
 
           if [[ "${{ needs.validate-structure.result }}" != "success" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs.validate-deployment.result }}" != "success" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs.validate-contracts.result }}" != "success" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs.validate-services.result }}" != "success" ]]; then
             exit 1
           fi

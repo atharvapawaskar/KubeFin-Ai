@@ -1,0 +1,38 @@
+groups:
+  - name: kubefin-worker
+    rules:
+      - alert: KubeFinWorkerTargetDown
+        expr: absent(up{job="kubefin-worker"}) or up{job="kubefin-worker"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: KubeFin Worker metrics target is down
+          description: Prometheus has not been able to scrape a KubeFin Worker for 2 minutes.
+
+      - alert: KubeFinWorkerStreamLagHigh
+        expr: worker_usage_stream_lag_messages > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: KubeFin Worker usage stream lag is high
+          description: The Worker has more than 1000 unread usage stream entries for 10 minutes.
+
+      - alert: KubeFinWorkerDeadLetterEvents
+        expr: increase(worker_usage_events_total{outcome="dead_lettered"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: KubeFin Worker sent usage events to the dead-letter queue
+          description: At least one usage event was dead-lettered during the last 5 minutes.
+
+      - alert: KubeFinWorkerProcessingSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(worker_usage_event_processing_duration_seconds_bucket[5m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: KubeFin Worker event processing is slow
+          description: The p95 usage event processing time has exceeded 5 seconds for 10 minutes.

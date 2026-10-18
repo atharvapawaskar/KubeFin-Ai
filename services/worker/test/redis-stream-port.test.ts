@@ -35,6 +35,17 @@ test('reclaims pending stream entries and preserves payload fields', async () =>
   assert.deepEqual(result.deletedIds, ['2-0']);
 });
 
+test('reads consumer-group lag without exposing group identity as a metric label', async () => {
+  const client = fakeClient({
+    xInfoGroups: (async () => [
+      { name: 'another-group', lag: 4 },
+      { name: 'kubefin-worker-v1', lag: 17 },
+    ]) as (...args: never[]) => unknown,
+  });
+  const port = new RedisUsageStreamPort(client, 'usage-events:dlq');
+  assert.equal(await port.getLagMessages('usage-events', 'kubefin-worker-v1'), 17);
+});
+
 test('uses one Redis script to write the DLQ record only while source is pending and acknowledge it', async () => {
   let script = '';
   let options: unknown;
