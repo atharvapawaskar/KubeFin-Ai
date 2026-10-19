@@ -5,21 +5,31 @@ import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-async function allocatePort(): Promise<number> {
-  const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert.ok(address && typeof address !== 'string');
-  const { port } = address;
-  server.close();
-  await once(server, 'close');
-  return port;
+async function allocateDistinctPorts(): Promise<[number, number]> {
+  const appServer = createServer();
+  const metricsServer = createServer();
+
+  appServer.listen(0, '127.0.0.1');
+  metricsServer.listen(0, '127.0.0.1');
+  await Promise.all([once(appServer, 'listening'), once(metricsServer, 'listening')]);
+
+  const appAddress = appServer.address();
+  const metricsAddress = metricsServer.address();
+  assert.ok(appAddress && typeof appAddress !== 'string');
+  assert.ok(metricsAddress && typeof metricsAddress !== 'string');
+
+  const appPort = appAddress.port;
+  const metricsPort = metricsAddress.port;
+  assert.notEqual(appPort, metricsPort);
+
+  appServer.close();
+  metricsServer.close();
+  await Promise.all([once(appServer, 'close'), once(metricsServer, 'close')]);
+  return [appPort, metricsPort];
 }
 
 test('starts unready without dependencies and exits cleanly on SIGTERM', async () => {
-  const appPort = await allocatePort();
-  const metricsPort = await allocatePort();
+  const [appPort, metricsPort] = await allocateDistinctPorts();
   const entrypoint = fileURLToPath(new URL('../src/main.js', import.meta.url));
   const child = spawn(process.execPath, [entrypoint], {
     env: {
