@@ -1,0 +1,224 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #1e293b;
+  --glass-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.28));
+  --glass-border: rgba(255, 255, 255, 0.78);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(at 12% 8%, #bae6fd 0, transparent 45%),
+    radial-gradient(at 88% 12%, #ddd6fe 0, transparent 45%),
+    radial-gradient(at 80% 90%, #fbcfe8 0, transparent 45%),
+    radial-gradient(at 8% 88%, #bbf7d0 0, transparent 45%),
+    #f5f3ff;
+  background-attachment: fixed;
+}
+
+/* ---------- Glass surfaces ---------- */
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    0 10px 40px rgba(99, 102, 241, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.glass-lift {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.glass-lift:hover {
+  transform: translateY(-6px);
+  box-shadow:
+    0 18px 50px rgba(99, 102, 241, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+
+/* ---------- Transparent crystal buttons ---------- */
+.glass-btn {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.25rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 18px rgba(99, 102, 241, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+.glass-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.75) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 0.7s ease;
+}
+.glass-btn:hover::before {
+  transform: translateX(120%);
+}
+.glass-btn:hover {
+  background: rgba(255, 255, 255, 0.42);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.18), inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+.glass-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.glass-btn-sm {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+}
+.glass-btn-indigo {
+  color: #3730a3;
+  background: rgba(129, 140, 248, 0.22);
+  border-color: rgba(199, 210, 254, 0.95);
+}
+.glass-btn-indigo:hover {
+  background: rgba(129, 140, 248, 0.38);
+}
+.glass-btn-emerald {
+  color: #065f46;
+  background: rgba(52, 211, 153, 0.2);
+  border-color: rgba(167, 243, 208, 0.95);
+}
+.glass-btn-emerald:hover {
+  background: rgba(52, 211, 153, 0.36);
+}
+
+/* ---------- Inputs and text ---------- */
+.glass-input {
+  width: 100%;
+  border-radius: 0.75rem;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.875rem;
+  color: #1e293b;
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  outline: none;
+  box-shadow: inset 0 1px 3px rgba(99, 102, 241, 0.08);
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+.glass-input::placeholder {
+  color: #94a3b8;
+}
+.glass-input:focus {
+  border-color: #a5b4fc;
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 0 0 3px rgba(165, 180, 252, 0.35);
+}
+
+.text-gradient {
+  background: linear-gradient(90deg, #6366f1, #0ea5e9 50%, #10b981);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- Animations ---------- */
+@keyframes kf-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes kf-facet {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes kf-fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes kf-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes kf-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(30px, -24px) scale(1.08); }
+}
+@keyframes kf-glow {
+  0%, 100% {
+    box-shadow: 0 0 40px rgba(129, 140, 248, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  }
+  50% {
+    box-shadow: 0 0 90px rgba(56, 189, 248, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  }
+}
+
+.kf-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: kf-draw 1s ease forwards;
+}
+.kf-facet {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: kf-facet 0.6s ease-out forwards;
+}
+.kf-fade-up {
+  opacity: 0;
+  animation: kf-fade-up 0.8s ease-out forwards;
+}
+.kf-float {
+  animation: kf-float 6s ease-in-out infinite;
+}
+.kf-drift {
+  animation: kf-drift 18s ease-in-out infinite;
+}
+.kf-glow {
+  animation: kf-glow 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kf-draw, .kf-facet, .kf-fade-up, .kf-float, .kf-drift, .kf-glow {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+}
+
+/* ---------- Glass look for the dashboards (no page edits needed) ---------- */
+.glass-portal main div.bg-white {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  border-color: var(--glass-border);
+  box-shadow: 0 8px 30px rgba(99, 102, 241, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+.glass-portal main .border-slate-200 {
+  border-color: rgba(255, 255, 255, 0.75);
+}
+.glass-portal main .border-slate-100 {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+.glass-portal main .bg-slate-50 {
+  background: rgba(255, 255, 255, 0.35);
+}
+.glass-portal main input,
+.glass-portal main select {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.85);
+}
