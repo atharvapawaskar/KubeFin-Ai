@@ -47,7 +47,7 @@ async function main() {
 
   const [raw, rawSchema] = await Promise.all([
     readFile(file, 'utf8'),
-    readFile(new URL('../../contracts/db/pricing.v2.json', import.meta.url), 'utf8'),
+    readFile(new URL('../../../contracts/db/pricing.v2.json', import.meta.url), 'utf8'),
   ]);
   const records = JSON.parse(raw);
   if (!Array.isArray(records) || records.length === 0) return fail('Pricing file must contain a non-empty JSON array.');

@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubefin-gateway.fullname" . }}
+  labels:
+    {{- include "kubefin-gateway.labels" . | nindent 4 }}
+  {{- $annotations := deepCopy .Values.service.annotations }}
+  {{- if .Values.metrics.scrapeAnnotations }}
+  {{- $_ := set $annotations "prometheus.io/scrape" "true" }}
+  {{- $_ := set $annotations "prometheus.io/path" "/metrics" }}
+  {{- $_ := set $annotations "prometheus.io/port" (printf "%v" .Values.service.port) }}
+  {{- $_ := set $annotations "prometheus.io/scheme" "http" }}
+  {{- end }}
+  {{- with $annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "kubefin-gateway.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP

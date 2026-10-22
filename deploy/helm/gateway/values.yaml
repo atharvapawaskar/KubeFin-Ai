@@ -1,0 +1,70 @@
+replicaCount: 2
+image:
+  repository: kubefin-gateway
+  tag: local
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+service:
+  type: ClusterIP
+  annotations: {}
+  port: 3000
+metrics:
+  scrapeAnnotations: true
+secrets:
+  existingSecret: kubefin-gateway-runtime
+  apiKeyKey: API_KEY
+  geminiApiKeyKey: GEMINI_API_KEY
+  redisUrlKey: REDIS_URL
+gateway:
+  logLevel: info
+  tenantId: default-tenant
+  defaultProvider: gemini
+  geminiModel: gemini-1.5-flash
+  geminiTimeoutMs: 30000
+  redisStream: usage-events
+  redisEnabled: true
+  redisMaxRetries: 3
+  redisRetryDelayMs: 100
+  rateLimitEnabled: true
+  rateLimitMaxRequests: 60
+  rateLimitWindowMs: 60000
+  rateLimitFailureMode: fail-closed
+  metricsEnabled: true
+  maxPayloadBytes: 1048576
+  circuitBreakerEnabled: true
+  circuitBreakerFailureThreshold: 5
+  circuitBreakerResetTimeoutMs: 30000
+  circuitBreakerHalfOpenProbes: 1
+  upstreamMaxRetries: 2
+  upstreamRetryBaseDelayMs: 200
+  upstreamRetryMaxDelayMs: 2000
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  capabilities:
+    drop: [ALL]
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 256Mi
+terminationGracePeriodSeconds: 30
+nodeSelector: {}
+tolerations: []
+affinity: {}
