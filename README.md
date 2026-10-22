@@ -25,18 +25,18 @@ Application → Kubefin Gateway → AI Provider
                 ↓
             Cost Calculation → Aggregation → MongoDB
                 ↓
-            Dashboard / API
+            Frontend / API
 ```
 
 **Synchronous path**: Application → Gateway → Provider → Application  
-**Asynchronous path**: Gateway → Redis Streams → Worker → MongoDB → Dashboard
+**Asynchronous path**: Gateway → Redis Streams → Worker → MongoDB → Frontend
 
 ## Team Ownership
 
 | Member | Role | Primary Ownership |
 |--------|------|-------------------|
 | Vedant Rathod (M1) | Gateway/Backend | Gateway, auth, policy, rate limiting, budgets, provider adapters, routing, event generation |
-| Om Pawar (M2) | Frontend | Dashboard, visualizations, spend/usage/budget views, workload analytics, optimization UI |
+| Om Pawar (M2) | Frontend | Visualizations, spend/usage/budget views, workload analytics, optimization UI |
 | Atharva Pawaskar (M3) | Worker/DevOps | Worker, Redis Streams, cost calc, aggregation, recommendations, Docker, K8s, Helm, observability |
 
 **Shared**: Contracts, architecture decisions, integration boundaries, cross-cutting documentation
@@ -54,7 +54,7 @@ kubefin/
 ├── team/           # TEAM.md
 ├── contracts/      # Shared interfaces (api/, events/, db/, redis/)
 ├── services/       # gateway/, worker/, control-plane/
-├── frontend/       # Dashboard
+├── frontend/       # Web application
 ├── deploy/         # docker/, helm/, k8s/
 └── .github/        # CI, CODEOWNERS, PR template
 ```

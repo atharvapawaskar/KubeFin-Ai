@@ -47,7 +47,7 @@ A Kubernetes-native gateway and control plane that provides:
 - Spend analytics endpoints
 - Budget CRUD + alerting
 
-### Frontend Dashboard
+### Frontend
 - FinOps overview (total spend, trends)
 - Spend analysis (by tenant/team/workload/provider/model)
 - Workload insights (latency, errors, cache hits)
@@ -78,7 +78,7 @@ A Kubernetes-native gateway and control plane that provides:
 | Gateway p99 latency overhead | < 50ms |
 | Event processing lag | < 30s |
 | Cost calculation accuracy | 100% vs provider bills |
-| Dashboard query latency | < 2s |
+| Analytics query latency | < 2s |
 | Gateway uptime | 99.9% |
 
 ## Important Open Questions

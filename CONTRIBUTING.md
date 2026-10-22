@@ -5,7 +5,7 @@
 - **main** is the shared integration branch. No direct pushes.
 - All work happens on **short-lived task branches** cut from main.
 - Branch naming: `<member>/<area>-<description>`
-  - Examples: `m1/gateway-auth`, `m2/dashboard-spend`, `m3/worker-cost-calc`
+  - Examples: `m1/gateway-auth`, `m2/frontend-spend`, `m3/worker-cost-calc`
 - Branch lifetime: 1–3 days. If longer, split the work.
 
 ## Pull Requests

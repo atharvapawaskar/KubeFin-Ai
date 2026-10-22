@@ -5,7 +5,7 @@
 | Member | Role | Primary Ownership |
 |--------|------|-------------------|
 | **Vedant Rathod** (M1) | Gateway / Backend | `services/gateway/` — authentication, identity resolution, policy enforcement, rate limiting, budget enforcement, provider adapters, model/provider routing, usage event generation |
-| **Om Pawar** (M2) | Frontend | `frontend/` — dashboard, visualizations, spend/usage/budget views, workload analytics, optimization UI |
+| **Om Pawar** (M2) | Frontend | `frontend/` — visualizations, spend/usage/budget views, workload analytics, optimization UI |
 | **Atharva Pawaskar** (M3) | Worker / DevOps | `services/worker/` — Redis Streams consumer, cost calculation, aggregation, recommendations; `deploy/` — Docker, Kubernetes, Helm, infrastructure, observability |
 
 ## Shared Ownership

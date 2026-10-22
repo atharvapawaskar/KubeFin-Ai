@@ -5,7 +5,7 @@
 Kubefin is a Kubernetes-native AI FinOps platform with two planes:
 
 - **Data Plane (Gateway)**: Synchronous request path — low latency, high throughput
-- **Control Plane (Worker + API + Dashboard)**: Asynchronous processing — cost calculation, aggregation, visualization
+- **Control Plane (Worker + API + Frontend)**: Asynchronous processing — cost calculation, aggregation, visualization
 
 ## B. Logical Components
 
@@ -36,7 +36,7 @@ Kubefin is a Kubernetes-native AI FinOps platform with two planes:
 │                                          ▼                       │
 │  ┌──────────────┐    ┌──────────────────────────────────────┐  │
 │  │  FRONTEND    │◀───│           CONTROL PLANE               │  │
-│  │ (Dashboard)  │    │  services/worker/ + API               │  │
+│  │  (Web UI)    │    │  services/worker/ + API               │  │
 │  └──────────────┘    │  ┌──────────────┐ ┌──────────┐       │  │
 │                      │  │ Event        │ │ Cost     │       │  │
 │                      │  │ Processor    │ │ Engine   │       │  │
@@ -110,7 +110,7 @@ MongoDB: Collections
 Control Plane API reads aggregations
     │
     ▼
-Frontend Dashboard visualizes data
+Frontend visualizes data
 ```
 
 ## E. Component Responsibilities
@@ -139,10 +139,10 @@ Frontend Dashboard visualizes data
 
 ### Control Plane Analytics API (`services/control-plane/`) — Owner: Atharva (M3)
 
-The API reads only published hourly/daily generations from `cost_aggregation_windows` and `cost_aggregations`. `GET /api/v2/analytics/spend` returns totals, observed time-series buckets, and an optional paginated breakdown. OIDC bearer tokens are checked against the configured issuer, audience, and HTTPS JWKS endpoint; a configured claim supplies the tenant IDs used to scope every query. Amounts are exact decimal strings, and currency and priced/unpriced groups are never combined. Dashboard integration is owned by Member 2.
+The API reads only published hourly/daily generations from `cost_aggregation_windows` and `cost_aggregations`. `GET /api/v2/analytics/spend` returns totals, observed time-series buckets, and an optional paginated breakdown. OIDC bearer tokens are checked against the configured issuer, audience, and HTTPS JWKS endpoint; a configured claim supplies the tenant IDs used to scope every query. Amounts are exact decimal strings, and currency and priced/unpriced groups are never combined. Frontend integration is owned by Member 2.
 
 ### Frontend (`frontend/`) — Owner: Om (M2)
-React + TypeScript dashboard consuming Control Plane API. Pages: FinOps overview, Spend Analysis, Workload Insights, Budget Management, Optimization.
+React + TypeScript application consuming Control Plane API. Pages: FinOps overview, Spend Analysis, Workload Insights, Budget Management, Optimization.
 
 ### MongoDB
 The Stage 2 proposal stores `usage_events` in a regular collection with event ID as the unique `_id` so redelivery is idempotent. Time-series collections may be used for `cost_aggregations` and other data where the schema supports them. This raw-event collection choice is pending contract review.
@@ -170,7 +170,7 @@ Pluggable adapters for OpenAI, Anthropic, Ollama (vLLM/TGI future)
 | Request → Response | HTTP (sync) | < 50ms overhead |
 | Gateway → Event | Redis Streams (async) | Non-blocking |
 | Event → MongoDB | Worker processing | < 30s lag |
-| MongoDB → Dashboard | REST API | < 2s query |
+| MongoDB → Frontend | REST API | < 2s query |
 
 ## G. Control Flow
 
@@ -242,4 +242,4 @@ Pluggable adapters for OpenAI, Anthropic, Ollama (vLLM/TGI future)
 2. **Kafka is deferred** — not part of MVP; will be evaluated when throughput exceeds Redis Streams capacity or replay/retention needs grow.
 3. **Modular architecture with Gateway, Worker, Frontend, MongoDB, and Redis** — clear ownership boundaries for 3-person team.
 4. **Shared interfaces maintained under `contracts/`** — API (OpenAPI), events (JSON Schema), DB (collection schemas), Redis (key conventions).
-5. **Architecture remains simple enough for 2–3 week vertical slice** — Phase 0-3 deliver end-to-end flow: request → gateway → provider → event → worker → MongoDB → dashboard.
+5. **Architecture remains simple enough for 2–3 week vertical slice** — Phase 0-3 deliver end-to-end flow: request → gateway → provider → event → worker → MongoDB → frontend.

@@ -145,7 +145,7 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 
 ---
 
-## Phase 5 — Dashboard MVP
+## Phase 5 — Frontend MVP
 
 **Goal**: Frontend displays real spend data from the authenticated, currency-safe Control Plane API.
 
@@ -157,17 +157,17 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 - Verify OIDC bearer tokens and authorize tenant scope from a configured claim
 - Preserve currency and priced/unpriced groups; serialize exact amount strings and provide bounded breakdown pagination
 - `/api/v2/analytics/spend` endpoint contract (`contracts/api/control-plane-api.v2.yaml`)
-- FinOps Dashboard page (total spend, daily trend, top workloads)
+- FinOps overview page (total spend, daily trend, top workloads)
 - Spend Analysis page (breakdown by tenant/team/workload/provider/model)
 
-**Owner**: Atharva (M3) for API; Om (M2) for Dashboard integration
+**Owner**: Atharva (M3) for API; Om (M2) for Frontend integration
 
 **Integration Points**:
-- Dashboard → Control Plane API → MongoDB aggregations
+- Frontend → Control Plane API → MongoDB aggregations
 - Contracts: `contracts/api/control-plane-api.v2.yaml`; the USD-only v1 contract remains unchanged
 
 **Completion Criteria**:
-- Dashboard loads and shows real data
+- Frontend loads and shows real data
 - Spend breakdown filters and pagination work
 - Unauthorized tenant filters are rejected before data access
 - Currencies and unpriced usage remain distinct
@@ -186,7 +186,7 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 - Budget enforcement middleware (Redis counter, 402 on exceed)
 - Policy engine (model allow-list, max tokens per request)
 - Budget CRUD in Control Plane API
-- Budget Management page in Dashboard
+- Budget Management page in the Frontend
 - Integration tests (429, 402 responses)
 
 **Owner**: Vedant (M1) + Atharva (M3) for budget API + Om (M2) for UI
@@ -199,7 +199,7 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 **Completion Criteria**:
 - Requests over rate limit → 429
 - Requests over budget → 402
-- Budgets creatable/editable via Dashboard
+- Budgets creatable/editable via the Frontend
 - Policies enforced per tenant
 
 ---
@@ -215,7 +215,7 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 - ServiceAccount → workload identity mapping
 - Sync metadata to Gateway (identity resolution)
 - Sync metadata to Worker (enrichment)
-- Workload selector in Dashboard
+- Workload selector in the Frontend
 
 **Owner**: Atharva (M3)
 
@@ -226,7 +226,7 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 - Contracts: `contracts/db/workloads.json` (future)
 
 **Completion Criteria**:
-- New pods appear in Dashboard with correct identity
+- New pods appear in the Frontend with correct identity
 - Usage events carry `workloadId` from K8s
 - No manual workload registration needed
 
@@ -236,14 +236,14 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 
 **Goal**: Generate actionable cost/performance recommendations.
 
-**Dependencies**: Phase 4 (aggregations), Phase 5 (Dashboard)
+**Dependencies**: Phase 4 (aggregations), Phase 5 (Frontend)
 
 **Major Tasks**:
 - Model optimization (cheaper model for similar quality)
 - Provider optimization (cost vs latency tradeoff)
 - Cache optimization (identify cacheable workloads)
 - Recommendations API endpoint
-- Optimization page in Dashboard
+- Optimization page in the Frontend
 - Estimated savings calculation
 
 **Owner**: Atharva (M3) + Om (M2) for UI
@@ -254,7 +254,7 @@ Dependency-driven, not calendar-driven. Each phase lists goal, dependencies, maj
 - Contracts: `contracts/db/recommendations.json`
 
 **Completion Criteria**:
-- Dashboard shows ranked recommendations with $ savings
+- Frontend shows ranked recommendations with $ savings
 - Recommendations actionable (model swap, provider switch)
 - Savings estimates documented
 
@@ -323,7 +323,7 @@ Phase 0
   │
   ├── Phase 1 (Gateway MVP) ──▶ Phase 2 (Event Pipeline) ──▶ Phase 3 (Cost) ──▶ Phase 4 (Persistence)
   │       │                           │                        │                   │
-  │       │                           │                        │                   ├── Phase 5 (Dashboard)
+  │       │                           │                        │                   ├── Phase 5 (Frontend)
   │       │                           │                        │                   │
   │       ├── Phase 6 (Policies/Budgets) ◀────────────────────┘                   │
   │       │                                                                       │
