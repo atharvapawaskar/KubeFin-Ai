@@ -1,6 +1,7 @@
 # RFC: Redis Budget Counter Contract & Real-Time Gateway Enforcement
 
 - **Authors:** M1 (Vedant Rathod — AI Gateway) & M3 (Atharva Pawaskar — Worker / Asynchronous Pipeline)
+- **Version:** 0.5.1
 - **Status:** Approved Architectural Baseline (M1 & M3 Consensus on Missing-Budget Policy, Option C Reconciliation, and Cluster Stream Hash-Tags; Implementation Blocked on Pre-Implementation Gates; Contradictions Resolved in v0.5.1)
 - **Target Task:** Task 3.2 Gate (Phase 3 Budget & Policy Enforcement — BLOCKED pending migration safeguards, repair safeguards, and verification gates)
 - **Related Contracts:**
@@ -380,7 +381,7 @@ Any manual counter repair procedure requires strict adherence to three safeguard
 |---|---|---|---|
 | **1. Gateway crashes before dispatch** | `RESERVED_PRE_DISPATCH` | No event | Active Reaper detects deadline expiry; confirms pre-dispatch; safely decrements `budget:reserved`; marks `EXPIRED_UNBILLED`. |
 | **2. Gateway crashes after dispatch** | `DISPATCHED_IN_FLIGHT` | No event | Active Reaper detects deadline expiry; identifies post-dispatch; transitions to `ORPHANED_DISPATCHED_UNCERTAIN`; retains reservation in `budget:reserved`; alerts reconciliation. |
-| **3. Settlement succeeds, stream `XADD` fails** | `SETTLED` | No event | Gateway catches `XADD` failure; spools event to local disk fallback; background drainer retries `XADD` with identical UUID `eventId`. |
+| **3. Settlement succeeds, stream `XADD` fails** | `SETTLED` | No event | Gateway retries `XADD` up to 3 times (`redis-publisher.ts`); persistent failures log error (local disk fallback spooling is proposed/unimplemented); reconciliation audit identifies missing MongoDB spend. |
 | **4. Stream published, Gateway crashes before HTTP 200** | `SETTLED` | Event published | Worker persists to MongoDB. Client retries request with same `x-request-id`; Gateway recognizes `eventId` as `ALREADY_SETTLED` and returns cached completion. |
 | **5. Worker persists to MongoDB, stream `XACK` fails** | `SETTLED` | Pending in PEL | Worker reclaims pending entry (`XAUTOCLAIM`). MongoDB unique index `_id: eventId` returns duplicate key error; Worker recognizes duplicate (`'duplicate'`) and sends `XACK`. Zero double-counting. |
 | **6. Provider times out after request sent** | `UNCERTAIN_HELD` | No event yet | Held in quarantine in `budget:reserved` pending audited manual reconciliation / operator investigation. |
@@ -392,6 +393,16 @@ Any manual counter repair procedure requires strict adherence to three safeguard
 All keys share the hash tag `{budget:<tenantId>:<scopeType>:<scopeId>:<currency>:<period>}` ensuring 100% Redis Cluster slot co-location.
 
 ### Script 1: `reserve_budget.lua`
+
+> [!CAUTION]
+> ### Prototype Status: Non-Executable Reference Specification (Rejected for Production Implementation)
+> **Pre-Implementation Blocker:** This script is an illustrative structural prototype, **NOT an approved executable implementation**.
+> **Why an Executable Script Cannot Be Specified from Current Decisions:**
+> 1. **Anti-Silent-Zero Invariant:** Approved invariants prohibit falling back to `'0'` via `GET spend or '0'`, `GET reserved or '0'`, or `GET limit or '0'`, because an evicted, lost, or corrupted key mid-window would silently reset spend or limits to zero, leading to catastrophic budget breaches.
+> 2. **Window Rollover Deadlock:** Conversely, failing closed on a missing spend key (`MISSING_SPEND_COUNTER`) rejects all legitimate requests at UTC window boundaries unless an authoritative mechanism pre-creates the window spend counter.
+> 3. **Unestablished Initialization Authority:** Existing contracts do not establish whether the Control Plane, Gateway, or an asynchronous worker owns the pre-creation/initialization of fresh window keys.
+> 4. **No Ad-Hoc Protocols:** The Gateway must not invent an unapproved initialization mechanism.
+> Until the **Window Initialization Protocol** is formally agreed between M1 and M3, this snippet is **strictly classified as non-executable/rejected for production deployment**, and Task 3.2 remains `[!] BLOCKED`.
 ```lua
 -- KEYS[1]: budget:limit:{budget:...}
 -- KEYS[2]: budget:spend:{budget:...}:<window>
@@ -457,18 +468,69 @@ if existing_state then
         return {0, 0, 0, 'CONFLICT_REQUEST_MISMATCH'}
     end
 
-    local current_spend = tonumber(redis.call('GET', KEYS[2]) or '0')
-    local current_reserved = tonumber(redis.call('GET', KEYS[3]) or '0')
-    local limit = tonumber(redis.call('GET', KEYS[1]) or '0')
+    -- Validate stored counters without silent zero fallback
+    local spend_str = redis.call('GET', KEYS[2])
+    local reserved_str = redis.call('GET', KEYS[3])
+
+    if not spend_str or not reserved_str then
+        return {0, 0, 0, 'MISSING_OR_CORRUPTED_COUNTER'}
+    end
+    if not string.match(spend_str, "^[0-9]+$") or not string.match(reserved_str, "^[0-9]+$") then
+        return {0, 0, 0, 'CORRUPTED_STORED_COUNTER'}
+    end
+    local current_spend = tonumber(spend_str)
+    local current_reserved = tonumber(reserved_str)
+
+    -- Terminal / quarantine early exit (no limit resolution required)
+    if string.find(existing_state, '^RELEASED') or existing_state == 'EXPIRED_UNBILLED' then
+        return {0, 0, 0, 'ALREADY_RELEASED'}
+    elseif existing_state == 'UNCERTAIN_HELD' or existing_state == 'ORPHANED_DISPATCHED_UNCERTAIN' then
+        return {0, 0, 0, 'UNCERTAIN_HELD'}
+    end
+
+    -- For active admissions (ALREADY_RESERVED / ALREADY_SETTLED), the response tuple requires an authoritative limit.
+    -- INVARIANT: A missing limit MUST NOT silently default to zero ('or 0' is strictly prohibited).
+    local limit_str = redis.call('GET', KEYS[1])
+    local meta_enforcement = redis.call('HGET', KEYS[6], 'enforcement')
+    local meta_unconstrained = redis.call('HGET', KEYS[6], 'unconstrained')
+
+    -- Validate enforcement metadata
+    if meta_enforcement and meta_enforcement ~= 'hard' and meta_enforcement ~= 'alert_only' then
+        return {0, 0, 0, 'INVALID_ENFORCEMENT_METADATA'}
+    end
+    if meta_unconstrained and meta_unconstrained ~= '0' and meta_unconstrained ~= '1' then
+        return {0, 0, 0, 'INVALID_UNCONSTRAINED_VALUE'}
+    end
+
+    local limit = 0
+    if meta_unconstrained == '1' then
+        limit = 0 -- Unconstrained sentinel
+    elseif meta_enforcement == 'hard' or not meta_enforcement then
+        -- Hard enforcement (or missing metadata) requires a valid, positive budget:limit key.
+        -- If the limit key is missing on replay, do not assume zero; fail closed with NO_BUDGET_FOR_CURRENCY.
+        if not limit_str or not string.match(limit_str, "^[0-9]+$") then
+            return {0, 0, 0, 'NO_BUDGET_FOR_CURRENCY'}
+        end
+        limit = tonumber(limit_str)
+        if limit < 1 or limit > 100000000000000 then
+            return {0, 0, 0, 'LIMIT_OUT_OF_BOUNDS'}
+        end
+    else
+        -- alert_only mode: if limit key exists, validate it; if absent, unbudgeted tracking applies
+        if limit_str then
+            if not string.match(limit_str, "^[0-9]+$") then
+                return {0, 0, 0, 'CORRUPTED_STORED_COUNTER'}
+            end
+            limit = tonumber(limit_str)
+        else
+            limit = 0 -- Explicitly unbudgeted alert_only
+        end
+    end
 
     if existing_state == 'RESERVED_PRE_DISPATCH' or existing_state == 'DISPATCHED_IN_FLIGHT' then
         return {1, (current_spend + current_reserved), limit, 'ALREADY_RESERVED'}
     elseif existing_state == 'SETTLED' then
         return {1, current_spend, limit, 'ALREADY_SETTLED'}
-    elseif string.find(existing_state, '^RELEASED') or existing_state == 'EXPIRED_UNBILLED' then
-        return {0, 0, 0, 'ALREADY_RELEASED'}
-    elseif existing_state == 'UNCERTAIN_HELD' or existing_state == 'ORPHANED_DISPATCHED_UNCERTAIN' then
-        return {0, 0, 0, 'UNCERTAIN_HELD'}
     end
 end
 
@@ -977,6 +1039,7 @@ Before Gateway code implementation or Lua deployment begins, the following gates
 - [ ] **Manual Repair Operational Runbook:** Documented runbook detailing Gateway writer fencing and drain procedures under scope-wide lock `budget:recon:lock:{budget:...}`.
 - [ ] **Window Initialization Protocol:** Owning mechanism to initialize new calendar windows and distinguish legitimately fresh windows from unexpectedly evicted mid-window counters (eliminating unsafe `GET or '0'`).
 - [ ] **Audited Manual Repair Tooling Contract (RELEASED_RECONCILED):** Defined tooling, verification checks, and authorization workflow for resolving uncertain/orphaned requests to `RELEASED_RECONCILED` under writer fencing.
+- [ ] **Monthly Request Record Retention Alignment:** Explicit decision on whether monthly terminal request records (`budget:req`) expire after 35 days (window-only TTL, matching current Lua `retention_ttl <= 3024000`) or 42 days (window + 7-day grace period, matching `budget:spend`). Requires M1 & M3 agreement before updating Lua parameter validation bounds.
 - [ ] **Pre-Implementation Test Gate:** Gateway test suite and contract validation ready for atomic reservation, fail-closed handling, and reaper recovery.
 
 ---
@@ -990,4 +1053,4 @@ Before Gateway code implementation or Lua deployment begins, the following gates
 | 2026-10-20 | M1 (Vedant) | 0.3.0 | Architectural hardening: Check-before-capacity reservation idempotency, active reaper lifecycle accounting, exact IEEE-754 mantissa bounds proof. |
 | 2026-10-20 | M1 (Vedant) | 0.4.0 | Fixed verified design flaws: Explicit pre-dispatch vs post-dispatch lifecycle (`RESERVED_PRE_DISPATCH` vs `DISPATCHED_IN_FLIGHT`), prohibited releasing potentially billable reservations on deadline expiry, anti-clamping invariant enforcement (`INVARIANT_RESERVED_UNDERFLOW`), complete identity tuple validation, quarantine review deadline separation from key retention, safe reconciliation delta adjustment, and default fail-closed without request-parameter bypass. |
 | 2026-10-22 | M1 & M3 | 0.5.0 | Formal consensus on 3 architectural decisions: (1) Missing-budget policy: fail-closed 402 for hard enforcement; unbudgeted/alert_only allowed; missing/corrupted metadata fails safely with 503 BUDGET_STORE_ERROR. (2) Option C reconciliation: read-only drift detection + audited manual repair with scope-wide lock budget:recon:lock:{budget:...} and Gateway write fencing; eliminated automated delta mutations. (3) Redis Cluster DLQ shared hash tags {usage-events} agreed in principle; migration and rollback plan required before deployment. Task 3.2 remains blocked pending pre-implementation gates. |
-| 2026-10-22 | M1 & M3 | 0.5.1 | Resolved RFC contradictions and counter safety: (1) Superseded legacy Protocol 5 INCRBY drift adjustment with Option C read-only drift detection. (2) Prohibited automated startup reconstruction of budget:reserved from request hashes and automated rebuild of budget:spend from MongoDB. (3) Marked autonomous reconcile_release_budget.lua and RELEASED_RECONCILED as unresolved pending audited manual repair tooling. (4) Replaced unsafe 'GET spend or 0' fallback with explicit counter safety; documented Window Initialization Protocol as an explicit pre-implementation blocker. |
+| 2026-10-22 | M1 & M3 | 0.5.1 | Resolved RFC contradictions and counter safety: (1) Superseded legacy Protocol 5 INCRBY drift adjustment with Option C read-only drift detection. (2) Prohibited automated startup reconstruction of budget:reserved from request hashes and automated rebuild of budget:spend from MongoDB. (3) Marked autonomous reconcile_release_budget.lua and RELEASED_RECONCILED as unresolved pending audited manual repair tooling. (4) Replaced unsafe 'GET spend or 0' fallback with explicit counter safety; documented Window Initialization Protocol as an explicit pre-implementation blocker. (5) Explicitly classified reserve_budget.lua as a non-executable reference prototype pending Window Initialization Protocol agreement. |
