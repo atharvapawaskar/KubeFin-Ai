@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubefin-gateway.fullname" . }}
+  labels:
+    {{- include "kubefin-gateway.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "kubefin-gateway.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "kubefin-gateway.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "kubefin-gateway.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: gateway
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            - name: HOST
+              value: "0.0.0.0"
+            - name: LOG_LEVEL
+              value: {{ .Values.gateway.logLevel | quote }}
+            - name: TENANT_ID
+              value: {{ .Values.gateway.tenantId | quote }}
+            - name: DEFAULT_PROVIDER
+              value: {{ .Values.gateway.defaultProvider | quote }}
+            - name: GEMINI_MODEL
+              value: {{ .Values.gateway.geminiModel | quote }}
+            - name: GEMINI_TIMEOUT_MS
+              value: {{ .Values.gateway.geminiTimeoutMs | quote }}
+            - name: REDIS_USAGE_STREAM
+              value: {{ .Values.gateway.redisStream | quote }}
+            - name: REDIS_ENABLED
+              value: {{ .Values.gateway.redisEnabled | quote }}
+            - name: REDIS_MAX_RETRIES
+              value: {{ .Values.gateway.redisMaxRetries | quote }}
+            - name: REDIS_RETRY_DELAY_MS
+              value: {{ .Values.gateway.redisRetryDelayMs | quote }}
+            - name: RATE_LIMIT_ENABLED
+              value: {{ .Values.gateway.rateLimitEnabled | quote }}
+            - name: RATE_LIMIT_MAX_REQUESTS
+              value: {{ .Values.gateway.rateLimitMaxRequests | quote }}
+            - name: RATE_LIMIT_WINDOW_MS
+              value: {{ .Values.gateway.rateLimitWindowMs | quote }}
+            - name: RATE_LIMIT_FAILURE_MODE
+              value: {{ .Values.gateway.rateLimitFailureMode | quote }}
+            - name: METRICS_ENABLED
+              value: {{ .Values.gateway.metricsEnabled | quote }}
+            - name: GATEWAY_MAX_PAYLOAD_BYTES
+              value: {{ .Values.gateway.maxPayloadBytes | quote }}
+            - name: CIRCUIT_BREAKER_ENABLED
+              value: {{ .Values.gateway.circuitBreakerEnabled | quote }}
+            - name: CIRCUIT_BREAKER_FAILURE_THRESHOLD
+              value: {{ .Values.gateway.circuitBreakerFailureThreshold | quote }}
+            - name: CIRCUIT_BREAKER_RESET_TIMEOUT_MS
+              value: {{ .Values.gateway.circuitBreakerResetTimeoutMs | quote }}
+            - name: CIRCUIT_BREAKER_HALF_OPEN_PROBES
+              value: {{ .Values.gateway.circuitBreakerHalfOpenProbes | quote }}
+            - name: UPSTREAM_MAX_RETRIES
+              value: {{ .Values.gateway.upstreamMaxRetries | quote }}
+            - name: UPSTREAM_RETRY_BASE_DELAY_MS
+              value: {{ .Values.gateway.upstreamRetryBaseDelayMs | quote }}
+            - name: UPSTREAM_RETRY_MAX_DELAY_MS
+              value: {{ .Values.gateway.upstreamRetryMaxDelayMs | quote }}
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret must name a pre-created Secret" .Values.secrets.existingSecret | quote }}
+                  key: {{ .Values.secrets.apiKeyKey | quote }}
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret must name a pre-created Secret" .Values.secrets.existingSecret | quote }}
+                  key: {{ .Values.secrets.geminiApiKeyKey | quote }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret must name a pre-created Secret" .Values.secrets.existingSecret | quote }}
+                  key: {{ .Values.secrets.redisUrlKey | quote }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

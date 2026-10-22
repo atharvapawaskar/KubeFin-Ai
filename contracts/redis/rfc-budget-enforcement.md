@@ -1,8 +1,8 @@
 # RFC: Redis Budget Counter Contract & Real-Time Gateway Enforcement
 
 - **Authors:** M1 (Vedant Rathod — AI Gateway) & M3 (Atharva Pawaskar — Worker / Asynchronous Pipeline)
-- **Status:** Under Review — Revised Architectural Specification for Atharva Pawaskar's Formal Sign-Off
-- **Target Task:** Task 3.2 Gate (Phase 3 Budget & Policy Enforcement)
+- **Status:** Approved Architectural Baseline (M1 & M3 Consensus on Missing-Budget Policy, Option C Reconciliation, and Cluster Stream Hash-Tags; Implementation Blocked on Pre-Implementation Gates; Contradictions Resolved in v0.5.1)
+- **Target Task:** Task 3.2 Gate (Phase 3 Budget & Policy Enforcement — BLOCKED pending migration safeguards, repair safeguards, and verification gates)
 - **Related Contracts:**
   - `contracts/db/budgets.v2.json`
   - `contracts/api/control-plane-budgets.v2.yaml`
@@ -59,10 +59,10 @@ stateDiagram-v2
     DISPATCHED_IN_FLIGHT --> ORPHANED_DISPATCHED_UNCERTAIN: reap_expired_reservations.lua (Crashed after dispatch)
 
     UNCERTAIN_HELD --> SETTLED: settle_budget.lua (Late response / Worker reconciliation)
-    UNCERTAIN_HELD --> RELEASED_RECONCILED: reconcile_release_budget.lua (Audited non-billing proof)
+    UNCERTAIN_HELD --> RELEASED_RECONCILED: Audited Manual Repair Tooling (UNRESOLVED)
 
     ORPHANED_DISPATCHED_UNCERTAIN --> SETTLED: settle_budget.lua
-    ORPHANED_DISPATCHED_UNCERTAIN --> RELEASED_RECONCILED: reconcile_release_budget.lua
+    ORPHANED_DISPATCHED_UNCERTAIN --> RELEASED_RECONCILED: Audited Manual Repair Tooling (UNRESOLVED)
 ```
 
 #### Detailed State Definitions
@@ -83,12 +83,19 @@ stateDiagram-v2
    - The 15-minute review window is a **Reconciliation Review Deadline**, NOT a key retention TTL.
 4. **`ORPHANED_DISPATCHED_UNCERTAIN`:**
    - Gateway crashed after dispatching bytes upstream; detected by reaper.
-   - The reservation remains **HELD** in `budget:reserved` pending automated billing reconciliation.
+   - The reservation remains **HELD** in `budget:reserved` pending audited manual reconciliation / operator investigation under writer fencing.
 5. **`SETTLED`:**
    - Settled at actual integer micro-spend via `settle_budget.lua`.
    - Reservation decremented; cumulative `budget:spend` incremented.
-6. **`RELEASED_PRE_DISPATCH` / `RELEASED_UNBILLED` / `RELEASED_RECONCILED`:**
+6. **`RELEASED_PRE_DISPATCH` / `RELEASED_UNBILLED`:**
    - Confirmed unbilled. Reservation decremented; zero spend added.
+7. **`RELEASED_RECONCILED` (UNRESOLVED Lifecycle Transition):**
+   - **Autonomous Script Prohibited:** Autonomous background release scripts (such as speculative `reconcile_release_budget.lua`) are **PERMANENTLY REJECTED** under Option C.
+   - **Audited Manual Repair Only:** Transition from `UNCERTAIN_HELD` or `ORPHANED_DISPATCHED_UNCERTAIN` to `RELEASED_RECONCILED` is permitted strictly through authorized manual repair tooling after:
+     1. Operator verifies non-billing proof from the upstream provider.
+     2. Scope-wide distributed lock `budget:recon:lock:{budget:...}` is acquired.
+     3. Gateway writes for the scope are verified fenced/drained.
+   - Because the manual repair tooling contract and operator workflow have not been approved, this transition is **UNRESOLVED** and serves as an explicit pre-implementation gate for Task 3.2. Until then, reservations remain held in `budget:reserved`.
 
 #### Audited Recovery for Missing or Corrupted Expiry Entries
 - If an entry exists in `budget:res_expiry` whose corresponding `budget:req` record is missing, corrupted, or in an unknown state:
@@ -109,9 +116,12 @@ stateDiagram-v2
 | `DISPATCHED_IN_FLIGHT` | Provider 504 / Drop | `quarantine_budget.lua` | `UNCERTAIN_HELD` | None (Held) | None | `ZADD review_dl` | `QUARANTINED` |
 | `DISPATCHED_IN_FLIGHT` | Gateway Crashed (Reaper) | `reap_expired_reservations.lua` | `ORPHANED_DISPATCHED_UNCERTAIN` | None (Held) | None | `ZADD review_dl` | `ORPHANED_DISPATCHED_UNCERTAIN` |
 | `UNCERTAIN_HELD` | Late Provider Response | `settle_budget.lua` | `SETTLED` | `-amount` (if valid) | `+actual_spend` | `ZREM` | `SETTLED` |
-| `UNCERTAIN_HELD` | Reconciled Unbilled | `reconcile_release_budget.lua` | `RELEASED_RECONCILED` | `-amount` (if valid) | None | `ZREM` | `RELEASED_RECONCILED` |
+| `UNCERTAIN_HELD` | Reconciled Unbilled (Manual) | Manual Tooling (UNRESOLVED) | `RELEASED_RECONCILED` | `-amount` (if valid) | None | `ZREM` | `RELEASED_RECONCILED` |
 | `SETTLED` | Client Retry | `reserve_budget.lua` / `settle_budget.lua` | `SETTLED` | None | None | None | `ALREADY_SETTLED` |
 | `RELEASED_*` | Client Retry | `reserve_budget.lua` / `release_budget.lua` | `RELEASED_*` | None | None | None | `ALREADY_RELEASED` |
+
+> [!WARNING]
+> **`RELEASED_RECONCILED` Lifecycle Status:** Autonomous background execution of any reconciliation release script (e.g., speculative `reconcile_release_budget.lua`) is permanently rejected under Option C. The lifecycle transition to `RELEASED_RECONCILED` is strictly an UNRESOLVED pre-implementation gate for Task 3.2, pending an approved manual repair runbook with Gateway writer fencing. Held reservations remain held in `budget:reserved` until settled or manually resolved by operators.
 
 #### Provider Retries and Event ID Isolation
 - In `services/gateway/src/resilience/retry.ts`, transient provider errors (e.g. 503, 429) may trigger bounded upstream retries.
@@ -238,27 +248,42 @@ Amounts in USD, INR, or EUR are never combined or compared.
 - Conversion to integer micro-units:
   $$\text{mongo\_micros} = \left\lceil \text{costAmount} \times 1,000,000 \right\rceil$$
 
-#### Safe Drift Repair (No Blind Overwrites)
-At reconciliation time, live traffic is continuously settling in Redis.
-If reconciliation naively executes `SET budget:spend = mongo_sum`, it erases all legitimate spend settled by the Gateway during Worker ingestion lag.
-**The Safe Drift Adjustment Protocol:**
-1. Select a historical cutoff timestamp: $T_{\text{cutoff}} = \text{now} - 5 \text{ minutes}$.
-2. Query MongoDB for sum of settled events where $\text{occurredAt} < T_{\text{cutoff}}$ for the specific dimension key.
-3. Compare against Redis historical spend recorded for events prior to $T_{\text{cutoff}}$.
-4. Calculate audited drift:
-   $$\text{drift} = \text{mongo\_audited\_micros} - \text{redis\_historical\_micros}$$
-5. If $\text{drift} > 0$: Apply the delta atomically using native increment:
-   `INCRBY budget:spend:{...}:<window> drift`
-6. Never execute an unconditional `SET` on active cumulative spend counters.
+#### Read-Only Drift Detection & Superseded Automated Delta Adjustments
+Under the agreed Option C baseline (see Protocol 6.2):
+1. **Automated Delta Increments Permanently Superseded and Rejected:**
+   The legacy procedure that automatically adjusted Redis counters via `INCRBY budget:spend:{...}:<window> drift` is **PERMANENTLY SUPERSEDED AND REJECTED**. Automated background jobs MUST NOT mutate, adjust, or reconstruct Redis budget counters.
+2. **Read-Only Audit Scanning:**
+   Automated reconciliation processes operate strictly in read-only mode:
+   - Select a historical cutoff timestamp past the grace period: $T_{\text{cutoff}} = \text{now} - \text{grace period}$ (24h daily / 7d monthly).
+   - Query MongoDB for the sum of settled events where $\text{occurredAt} < T_{\text{cutoff}}$ for the specific 5-tuple dimension key.
+   - Compare against Redis historical spend recorded for the window.
+   - Calculate audited drift:
+     $$\text{drift} = \text{mongo\_audited\_micros} - \text{redis\_historical\_micros}$$
+   - When drift exceeds configured alert thresholds ($|\text{drift}| > \text{threshold}$), emit Prometheus metrics (`gateway_budget_reconciliation_drift_micros`) and operational alerts (`gateway_budget_reconciliation_audit_runs_total{status="drift_detected"}`).
+3. **Audited Manual Repair Required:**
+   Counter remediation is strictly manual, auditable, and out-of-band:
+   - The operator/tool MUST acquire the scope-wide distributed lock: `budget:recon:lock:{budget:<tenantId>:<scopeType>:<scopeId>:<currency>:<period>}`.
+   - Gateway writes for that budget scope MUST be fenced or write-drained before any mutation, ensuring zero in-flight provider calls are settling concurrently.
+   - All manual repairs MUST record operator identity, pre/post values, and MongoDB audit query source to `budget:recon:{budget:...}:<window>`.
 
 ---
 
-### Protocol 6: Default Fail-Closed & Authorized Unconstrained Bypass
+### Protocol 6: Missing-Budget Policy & Enforcement Modes (Agreed Architectural Decision)
 
-#### Strict Default Fail-Closed
-- In enterprise cost governance, missing configuration MUST default to strict denial.
-- If `budget:limit:{...}` does not exist in Redis, the Gateway and Lua scripts MUST fail closed with HTTP 402 `Payment Required` and error code `NO_BUDGET_FOR_CURRENCY`.
-- No request argument (`ARGV`) can disable this fail-closed default.
+#### Agreed Missing-Budget & Enforcement Policy
+Per agreement between M1 (Gateway) and M3 (Worker/Control Plane):
+1. **Explicitly Hard-Enforced Tenants (`enforcement == 'hard'`):**
+   - When hard enforcement is configured for a tenant/scope, but the required budget configuration is missing (the `budget:limit:{...}` key is absent in Redis or malformed/non-numeric), the Gateway and Lua scripts MUST reject the request.
+   - Exact API Response: HTTP 402 `Payment Required` with error code `NO_BUDGET_FOR_CURRENCY` (per `contracts/api/gateway-api.yaml`).
+   - Summary: *"No active budget configured for requested model currency under hard enforcement"*.
+2. **Explicitly Unbudgeted Tenants & Alert-Only Mode (`enforcement == 'alert_only'`):**
+   - Explicitly unbudgeted tenants (tenants without budget documents in the Control Plane / MongoDB) and tenants configured in `alert_only` mode MUST NOT be rejected solely because a `budget:limit` key is absent in Redis.
+   - For unbudgeted tenants: Admission proceeds without budget gating; usage events are emitted and ingested normally.
+   - For `alert_only` tenants: Admission is granted; spend is tracked and alert events are emitted when limits are configured and exceeded, but requests are not blocked.
+3. **Missing or Corrupted Enforcement Metadata (Safe Failure Mode):**
+   - Missing or invalid enforcement metadata must fail safely.
+   - If `budget:meta` contains an invalid/unrecognized enforcement mode (anything other than `"hard"` or `"alert_only"`), or if a Redis connection/store failure prevents verifying enforcement metadata for an active scope, the Gateway MUST fail safely.
+   - Exact API Response: HTTP 503 `Service Unavailable` with error code `BUDGET_STORE_ERROR` (per `contracts/api/gateway-api.yaml`: *"Budget store error: Unable to verify budget allocation due to store failure"*).
 
 #### Authorized Unconstrained Bypass (Configuration via `budget:meta` Hash)
 - Unconstrained spend is permitted ONLY if an authorized entitlement exists in the budget metadata hash:
@@ -276,25 +301,40 @@ If reconciliation naively executes `SET budget:spend = mongo_sum`, it erases all
 
 ---
 
-### Protocol 6.1: Reservation Counter Safety — No Expiry on Active/Uncertain Reservations
+### Protocol 6.1: Reservation Counter Safety — Non-Expiring Counters, Anti-Reconstruction Invariants, & Window Initialization
 
-#### `budget:reserved` — Non-Expiring While Reservations Exist
+#### `budget:reserved` — Non-Expiring While Reservations Exist & No Automatic Hash Reconstruction
 - The `budget:reserved:{budget:...}` counter **MUST NOT** carry a TTL while any request record in `budget:req` for that budget scope is in a non-terminal state (`RESERVED_PRE_DISPATCH`, `DISPATCHED_IN_FLIGHT`, `UNCERTAIN_HELD`, `ORPHANED_DISPATCHED_UNCERTAIN`).
 - Reference scripts **MUST NOT** call `EXPIRE` on `budget:reserved` (KEYS[3] in `reserve_budget.lua`, KEYS[2] in `settle_budget.lua`, KEYS[1] in `release_budget.lua`). All `EXPIRE` calls on the reservation counter are removed.
-- If Redis restarts or the key is lost (e.g., eviction, failover), the counter **MUST NOT** be silently reset to zero. Recovery procedure:
-  1. On Gateway startup or budget-scope reinitialization, reconstruct `budget:reserved` by scanning `budget:req` hashes for the budget scope and summing `amount` for all records whose state is `RESERVED_PRE_DISPATCH`, `DISPATCHED_IN_FLIGHT`, `UNCERTAIN_HELD`, or `ORPHANED_DISPATCHED_UNCERTAIN`.
-  2. If `budget:res_expiry` sorted set exists, cross-verify: any `eventId` present in the sorted set but missing from `budget:req` is a **corrupted/missing request record** — do not assume zero cost. Record `lastInvariantError = 'MISSING_REQUEST_RECORD_ON_REBUILD'`, emit alert `gateway_budget_rebuild_missing_records_total`, and retain the sorted-set entry for reconciliation.
-  3. If neither `budget:req` nor `budget:res_expiry` exists for the scope, initialize `budget:reserved = 0`.
-  4. Never trust a missing counter as proof that no reservations exist.
+- **Prohibition of Startup Reconstruction from Request Hashes:**
+  - Automated startup reconstruction of `budget:reserved` by scanning `budget:req` hashes (e.g., `HGETALL` or `SCAN` over request records) is **PROHIBITED AND SUPERSEDED** (per `contracts/redis/keys.md` Section 7 Invariant 2).
+  - Scanning request records creates race conditions with live concurrent mutations, risks double-counting or under-counting uncommitted settlements, and is vulnerable to missing evicted records.
+  - If `budget:reserved` is missing unexpectedly while requests are in flight, or if it contains non-numeric data, the system **MUST NOT** attempt automated speculative reconstruction from request records. It must fail closed with HTTP 503 `BUDGET_STORE_ERROR` and alert operators.
+  - Never trust an absent counter as proof that no reservations exist.
 
-#### `budget:spend` — Window-Partitioned Retention with Reconciliation Watermark
+#### `budget:spend` — Window Retention & Prohibition of Automated MongoDB Rebuilding
 - `budget:spend:{budget:...}:<window>` is partitioned by UTC period window (`YYYY-MM-DD` for daily, `YYYY-MM` for monthly).
 - **Retention rule:** The key **MUST NOT** expire before the budget window closes **plus** a reconciliation grace period of 24 hours (daily) / 7 days (monthly).
   - Daily window TTL: 48 hours (window) + 24 hours (grace) = **72 hours** minimum.
   - Monthly window TTL: 35 days (window) + 7 days (grace) = **42 days** minimum.
-- The grace period ensures the hourly reconciliation job can read historical spend from Redis for windows that have technically closed but may still have in-flight Gateway settlements or Worker ingestion lag.
-- After the grace period, the reconciliation job marks the window as `RECONCILED` in a control key `budget:recon:{budget:...}:<window> = "COMPLETE"`. Only then may the spend key be allowed to expire.
-- If Redis loses the spend key before the grace period ends, rebuild from MongoDB: sum `costAmount` (ceiling to micro-units) for all `usage_events` with `occurredAt` in that window and matching the 5 budget dimensions. Write the rebuilt value to Redis with the full remaining TTL.
+- The grace period ensures the read-only reconciliation scanner can inspect historical spend from Redis for windows that have technically closed but may still have in-flight Gateway settlements or Worker ingestion lag.
+- After the grace period, the reconciliation audit scanner records audit status in `budget:recon:{budget:...}:<window> = "COMPLETE"`. Only then may the spend key be allowed to expire.
+- **Prohibition of Automated MongoDB Rebuilding:**
+  - Automated rebuilding of `budget:spend` from MongoDB during runtime is **PROHIBITED AND SUPERSEDED** (per Option C).
+  - Background processes MUST NOT autonomously query MongoDB and overwrite or increment Redis spend counters during normal operations.
+  - Rebuilding or resetting a spend counter from MongoDB is permitted **ONLY** as part of an audited manual repair procedure executed under the scope-wide distributed lock `budget:recon:lock:{budget:...}` after fencing or draining Gateway writes.
+
+#### Counter Safety, Window Initialization, and Prohibition of Silent Zero Defaults
+- In accordance with `contracts/redis/keys.md` Section 7 Invariants 1 & 3, a missing or corrupt counter **MUST NOT** silently default to zero.
+- **Prohibition of Unsafe `GET spend or 0` Fallback:**
+  - Falling back to `'0'` via `GET spend or '0'` for an existing budget window is **STRICTLY PROHIBITED**.
+  - If a spend counter key is missing mid-window (e.g. due to eviction under memory pressure, Redis unpersisted restart, or failover), silently treating spend as `0` resets accumulated customer usage to zero, allowing tenants to breach budget limits with impunity.
+- **Distinguishing Fresh Windows from Missing Counters:**
+  - *Legitimately Initialized Fresh Window:* A newly started UTC calendar day or month where no prior usage has occurred legitimately begins with zero spend.
+  - *Unexpectedly Missing Counter:* An absent key for a window that is already in progress, or where reservations/request records exist, represents lost or evicted counter state. It must fail closed with HTTP 503 `BUDGET_STORE_ERROR` (`CORRUPTED_STORED_COUNTER` / `MISSING_STORED_COUNTER`).
+- **Pre-Implementation Blocker — Window Initialization Protocol:**
+  - Because current shared contracts do not define an authoritative mechanism to initialize new calendar windows and verify fresh window boundaries without risking fallback on evicted mid-window keys, the **Window Initialization Protocol is an explicit PRE-IMPLEMENTATION BLOCKER** for Task 3.2.
+  - No speculative or ad-hoc initialization mechanism may be invented in code until formally agreed between M1 and M3.
 
 #### `budget:req` — State-Gated Retention (Review Deadline ≠ Deletion TTL)
 - `budget:req:{budget:...}:<eventId>` records **MUST NOT** expire while the request state is non-terminal:
@@ -306,69 +346,31 @@ If reconciliation naively executes `SET budget:spend = mongo_sum`, it erases all
 
 ---
 
-### Protocol 6.2: Reconciliation — Design Limitations & Open Decisions
+### Protocol 6.2: Reconciliation & Drift Correction — Option C Agreed (Read-Only Drift Detection & Audited Manual Repair)
 
-**Status: This reconciliation protocol is NOT yet safe for implementation. Task 3.2 remains blocked for M3 review on the items below.**
+**Status: Agreed Architectural Decision between M1 and M3 (Option C Adopted).**
 
-The current reconciliation design has fundamental safety gaps that cannot be resolved without additional shared-contract decisions. The following issues are documented honestly rather than papered over with an unsafe algorithm.
+#### 1. Core Principles
+- **No Automated Counter Mutation or Reconstruction:** Automated background mutation of `budget:spend` (including speculative delta increment `INCRBY` algorithms) is permanently rejected. Automated background jobs MUST NOT mutate or reconstruct Redis budget counters.
+- **Read-Only Drift Detection:** The reconciliation background process runs exclusively as a read-only audit scanner. It compares settled costs from MongoDB `usage_events` against Redis `budget:spend` for closed windows ($T > \text{grace period}$) and emits Prometheus metrics and operational alerts.
+- **Audited Manual Repair:** When drift exceeds operational thresholds, remediation occurs strictly through an authorized, audited operational runbook rather than automated scripts.
 
-#### Identified Safety Gaps
+#### 2. Manual Repair Protocol & Safeguards
+Any manual counter repair procedure requires strict adherence to three safeguards:
+1. **Scope-Wide Distributed Lock:**
+   The repair operator/tool must acquire the scope-wide distributed lock before reading or modifying counters:
+   `budget:recon:lock:{budget:<tenantId>:<scopeType>:<scopeId>:<currency>:<period>}`
+   - The lock is keyed by the canonical 5-tuple budget identity (scope-wide, not window-partitioned).
+   - Acquired via Redis `SET NX PX 30000` with heartbeat extension.
+2. **Gateway Writer Fencing & Drain:**
+   Prior to any manual adjustment or counter reset, Gateway traffic for that budget scope must be fenced or write-drained. This ensures zero in-flight provider calls are settling concurrently, preventing race conditions and counter underflow/overwrites.
+3. **Audit Trail & Verification:**
+   All manual adjustments must record operator identity, run identifier, pre-repair value, post-repair value, and MongoDB audit source in `budget:recon:{budget:<tenantId>:<scopeType>:<scopeId>:<currency>:<period>}:<window>` as an audit record, and emit Prometheus alert `gateway_budget_manual_repair_total`.
 
-1. **Double-Count Risk:** The proposed comparison sums `budget:spend` (which already includes settled events) **plus** `settledCost` from request records. Any event already reflected in `budget:spend` will be double-counted in the Redis historical sum.
-
-2. **Incomplete Event Identity in Redis:** The `budget:spend` counter is an opaque aggregate. It does not carry `eventId` identity. Reconciliation cannot distinguish "event already in spend" from "event not yet in spend" without a durable event-level index in Redis — which does not exist in this contract.
-
-3. **Five-Minute Cutoff Is Not Sufficient:** The `T_cutoff = now - 5 min` heuristic does not guarantee all in-flight settlements have landed. A slow provider response, circuit-breaker retry, or Worker ingestion lag can exceed 5 minutes. There is no proven bound.
-
-4. **Positive-Only Delta Repair Is Not Reconciliation:** Accepting only positive drift (`mongo > redis`) and alerting on negative drift (`redis > mongo`) leaves the system in an unreconciled state when Redis overcounts. This is a detection mechanism, not a repair protocol.
-
-5. **No Idempotent Replay Guarantee:** The `runId` monotonicity check does not prevent duplicate delta application if:
-   - MongoDB retries insert the same event twice (Worker bug or network retry)
-   - The reconciliation job crashes after `INCRBY` but before persisting `runId`
-   - Two reconciliation instances acquire the lock sequentially due to clock skew
-
-#### Required Design Decisions (Blocked for M3 Review)
-
-Before Task 3.2 can proceed, the team must agree on **one** of the following approaches:
-
-**Option A: Event-Level Redis Index (Recommended for Auditability)**
-- Add a per-event Redis index: `budget:event:{budget:...}:<eventId>` → `settledCost` (or `0` if released).
-- Reconciliation reads MongoDB event IDs for the window, fetches each from Redis, and computes drift per-event.
-- `INCRBY spend` only for events missing from Redis or with mismatched cost.
-- Cost: Additional Redis key per event (~50–100 bytes). Fits in hash slot.
-
-**Option B: Window-Versioned Spend Counter with Append-Only Log**
-- Replace `budget:spend` with `budget:spend_log:{budget:...}:<window>` (Redis Stream or List of `{eventId, cost}`).
-- Reconciliation replays the log vs MongoDB, rebuilds the aggregate atomically, and atomically swaps the active counter.
-- Cost: Log grows with event count; requires periodic compaction.
-
-**Option C: Reconciliation as Detection-Only, Manual Repair**
-- Reconciliation job **only computes and alerts drift**. Never mutates `budget:spend` automatically.
-- Operations runs a controlled, audited repair procedure (documented runbook) when drift exceeds threshold.
-- Simplest contract; pushes complexity to operational process.
-
-#### Current Safe Fallback (If No Decision Is Reached)
-
-Until M3 approves a reconciliation design:
-- **Do not implement automated reconciliation.**
-- `budget:spend` is written once per settlement via `INCRBY` and never mutated by a background job.
-- Drift detection runs as a read-only audit job (emits Prometheus metrics only).
-- Manual repair procedure is documented in a separate runbook (not in this RFC).
-- Task 3.2 Gateway implementation **can proceed with admission control and settlement** but **must not include a reconciliation writer**.
-
-#### Recovery Procedure for Missing Spend Key (Only for Option A or B)
-- If the chosen design includes a rebuildable spend key and the key is missing at startup:
-  1. Acquire distributed lock `budget:recon:lock:{budget:...}`.
-  2. Recompute from MongoDB for the active window only.
-  3. Write rebuilt value with TTL = remaining grace period.
-  4. Mark `budget:recon:{budget:...}:<window>.rebuiltAt = now`, `source = "MONGODB_REBUILD"`.
-  5. Release lock and emit alert `gateway_budget_spend_rebuilt_total{window="..."}`.
-  6. Do NOT run ordinary reconciliation in the same cycle.
-
-#### Metrics & Alerts (Proposed — Not Implemented)
-- `gateway_budget_reconciliation_drift_micros{window, direction="positive|negative"}` — Gauge, drift magnitude.
-- `gateway_budget_reconciliation_skipped_total{window, reason}` — Counter, why reconciliation did not run (lock held, no decision, etc.).
-- `gateway_budget_spend_rebuilt_total{window}` — Counter, spend key rebuilt from MongoDB.
+#### 3. Metrics & Drift Observability
+- `gateway_budget_reconciliation_drift_micros{tenantId, scopeType, scopeId, currency, period, window, direction="positive|negative"}` — Gauge recording drift magnitude.
+- `gateway_budget_reconciliation_audit_runs_total{status="clean|drift_detected"}` — Counter tracking read-only audit runs.
+- `gateway_budget_manual_repair_total{tenantId, currency, period, window}` — Counter tracking audited manual interventions.
 
 ---
 
@@ -381,7 +383,7 @@ Until M3 approves a reconciliation design:
 | **3. Settlement succeeds, stream `XADD` fails** | `SETTLED` | No event | Gateway catches `XADD` failure; spools event to local disk fallback; background drainer retries `XADD` with identical UUID `eventId`. |
 | **4. Stream published, Gateway crashes before HTTP 200** | `SETTLED` | Event published | Worker persists to MongoDB. Client retries request with same `x-request-id`; Gateway recognizes `eventId` as `ALREADY_SETTLED` and returns cached completion. |
 | **5. Worker persists to MongoDB, stream `XACK` fails** | `SETTLED` | Pending in PEL | Worker reclaims pending entry (`XAUTOCLAIM`). MongoDB unique index `_id: eventId` returns duplicate key error; Worker recognizes duplicate (`'duplicate'`) and sends `XACK`. Zero double-counting. |
-| **6. Provider times out after request sent** | `UNCERTAIN_HELD` | No event yet | Held in quarantine in `budget:reserved` pending automated billing reconciliation. |
+| **6. Provider times out after request sent** | `UNCERTAIN_HELD` | No event yet | Held in quarantine in `budget:reserved` pending audited manual reconciliation / operator investigation. |
 
 ---
 
@@ -470,8 +472,15 @@ if existing_state then
     end
 end
 
--- 3. Check Unconstrained Bypass in Metadata
+-- 3. Check Metadata: Enforcement Mode & Unconstrained Bypass
+local meta_enforcement = redis.call('HGET', KEYS[6], 'enforcement')
 local meta_unconstrained = redis.call('HGET', KEYS[6], 'unconstrained')
+
+-- Safe failure on malformed enforcement metadata
+if meta_enforcement and meta_enforcement ~= 'hard' and meta_enforcement ~= 'alert_only' then
+    return {0, 0, 0, 'INVALID_ENFORCEMENT_METADATA'}
+end
+
 if meta_unconstrained == '1' then
     -- Bypass still requires identity checks; return spend=0, reserved=0 as signal
     return {1, 0, 0, 'UNCONSTRAINED'}
@@ -480,19 +489,41 @@ elseif meta_unconstrained and meta_unconstrained ~= '0' then
     return {0, 0, 0, 'INVALID_UNCONSTRAINED_VALUE'}
 end
 
--- 4. Budget Limit Existence Check (Strict Fail-Closed)
+-- 4. Budget Limit Existence Check (Agreed Policy)
+-- Hard-enforced tenants require valid budget:limit; missing key fails closed with NO_BUDGET_FOR_CURRENCY.
+-- Explicitly unbudgeted or alert_only tenants are not rejected solely because budget:limit is absent.
 local limit_str = redis.call('GET', KEYS[1])
-if not limit_str or not string.match(limit_str, "^[0-9]+$") then
-    return {0, 0, 0, 'NO_BUDGET_FOR_CURRENCY'}
-end
-local limit = tonumber(limit_str)
-if limit < 1 or limit > 100000000000000 then -- Max 10^14 micros ($100M)
-    return {0, 0, 0, 'LIMIT_OUT_OF_BOUNDS'}
+local limit = 0
+
+if meta_enforcement == 'hard' then
+    if not limit_str or not string.match(limit_str, "^[0-9]+$") then
+        return {0, 0, 0, 'NO_BUDGET_FOR_CURRENCY'}
+    end
+    limit = tonumber(limit_str)
+    if limit < 1 or limit > 100000000000000 then -- Max 10^14 micros ($100M)
+        return {0, 0, 0, 'LIMIT_OUT_OF_BOUNDS'}
+    end
+elseif limit_str and string.match(limit_str, "^[0-9]+$") then
+    limit = tonumber(limit_str)
 end
 
--- 5. Validate Stored Counters
-local spend_str = redis.call('GET', KEYS[2]) or '0'
-local reserved_str = redis.call('GET', KEYS[3]) or '0'
+-- 5. Validate Stored Counters (Anti-Silent-Zero & Counter Safety)
+-- INVARIANT: Missing or corrupt counters MUST NOT silently default to zero.
+-- Documenting 'GET spend or 0' as a fallback for an existing budget window is strictly prohibited.
+-- Distinguishing a legitimately initialized new window (spend=0) from an unexpectedly missing/evicted
+-- counter mid-window is an unresolved blocker (Window Initialization Protocol).
+local spend_str = redis.call('GET', KEYS[2])
+local reserved_str = redis.call('GET', KEYS[3])
+
+-- For active budget enforcement, missing stored counters must fail safely closed:
+if not spend_str then
+    -- Missing spend counter for an active budget scope must fail closed rather than assuming zero
+    return {0, 0, 0, 'MISSING_SPEND_COUNTER'}
+end
+if not reserved_str then
+    return {0, 0, 0, 'MISSING_RESERVED_COUNTER'}
+end
+
 if not string.match(spend_str, "^[0-9]+$") or not string.match(reserved_str, "^[0-9]+$") then
     return {0, 0, 0, 'CORRUPTED_STORED_COUNTER'}
 end
@@ -500,8 +531,7 @@ local current_spend = tonumber(spend_str)
 local current_reserved = tonumber(reserved_str)
 
 -- 6. Capacity Admission Check with overflow-safe sum
-local meta_enforcement = redis.call('HGET', KEYS[6], 'enforcement')
-if meta_enforcement ~= 'alert_only' then
+if meta_enforcement == 'hard' and limit > 0 then
     -- Check bounds before addition to prevent overflow
     if current_spend > 400000000000000 or current_reserved > 400000000000000 then
         return {0, 0, 0, 'COUNTER_OUT_OF_BOUNDS'}
@@ -632,8 +662,11 @@ if not res_amount_str or not string.match(res_amount_str, "^[0-9]+$") then
 end
 local res_amount = tonumber(res_amount_str)
 
-local spend_str = redis.call('GET', KEYS[1]) or '0'
-local reserved_str = redis.call('GET', KEYS[2]) or '0'
+local spend_str = redis.call('GET', KEYS[1])
+local reserved_str = redis.call('GET', KEYS[2])
+if not spend_str or not reserved_str then
+    return {0, 0, 0, 'MISSING_OR_CORRUPTED_COUNTER'}
+end
 if not string.match(spend_str, "^[0-9]+$") or not string.match(reserved_str, "^[0-9]+$") then
     return {0, 0, 0, 'CORRUPTED_STORED_COUNTER'}
 end
@@ -728,9 +761,9 @@ if not res_amount_str or not string.match(res_amount_str, "^[0-9]+$") then
 end
 local res_amount = tonumber(res_amount_str)
 
-local reserved_str = redis.call('GET', KEYS[1]) or '0'
-if not string.match(reserved_str, "^[0-9]+$") then
-    return {0, 0, 'CORRUPTED_STORED_COUNTER'}
+local reserved_str = redis.call('GET', KEYS[1])
+if not reserved_str or not string.match(reserved_str, "^[0-9]+$") then
+    return {0, 0, 'CORRUPTED_OR_MISSING_RESERVED_COUNTER'}
 end
 local current_reserved = tonumber(reserved_str)
 
@@ -875,11 +908,11 @@ for _, event_id in ipairs(expired_ids) do
         corrupted_count = corrupted_count + 1
     elseif state == 'RESERVED_PRE_DISPATCH' then
         -- Confirmed never dispatched: safe to release if reserved counter is valid
-        local current_res_str = redis.call('GET', KEYS[1]) or '0'
+        local current_res_str = redis.call('GET', KEYS[1])
         local amount = tonumber(amount_str)
-        if not string.match(current_res_str, "^[0-9]+$") then
-            -- Counter is corrupted: do not mutate, advance score, alert invariant
-            redis.call('HSET', req_key, 'lastInvariantError', 'CORRUPTED_RESERVED_COUNTER')
+        if not current_res_str or not string.match(current_res_str, "^[0-9]+$") then
+            -- Counter is missing or corrupted: do not mutate, advance score, alert invariant
+            redis.call('HSET', req_key, 'lastInvariantError', 'CORRUPTED_OR_MISSING_RESERVED_COUNTER')
             redis.call('ZADD', KEYS[2], current_epoch + 60000, event_id)
             invariant_count = invariant_count + 1
         else
@@ -928,17 +961,23 @@ return {reaped_count, orphaned_count, invariant_count, corrupted_count}
 
 ---
 
-## 4. Atharva Pawaskar's Review Gate & Sign-Off Checklist
+## 4. Architectural Agreement & Implementation Readiness Gates
 
-Before Task 3.2 Gateway implementation is unblocked, Atharva Pawaskar (M3) must review and sign off on this RFC and the shared contracts.
+M1 (Gateway) and M3 (Worker / Control Plane) have reached explicit agreement on the core architectural decisions for Task 3.2.
 
-### Review Sign-Off Checklist for M3:
-- [ ] **Crash-Safe Lifecycle:** Consensus on explicit pre-dispatch (`RESERVED_PRE_DISPATCH`) vs post-dispatch (`DISPATCHED_IN_FLIGHT`) states; agreement that post-dispatch reservations are never released merely because a deadline passed.
-- [ ] **Anti-Clamping Integer Arithmetic:** Consensus on rejecting negative/malformed counters and returning `INVARIANT_RESERVED_UNDERFLOW` rather than silently clamping to zero.
-- [ ] **Multi-Dimensional Idempotency:** Agreement on binding `eventId` to the complete identity tuple `(tenantId, scopeType, scopeId, currency, period, amount)`.
-- [ ] **Quarantine Review Deadline:** Agreement that the 15-minute `UNCERTAIN_HELD` window is an operational review deadline, NOT a key deletion TTL.
-- [ ] **Strict Default Fail-Closed:** Consensus that missing currency budget keys fail closed with HTTP 402 `NO_BUDGET_FOR_CURRENCY`, with unconstrained bypass restricted to authorized Control Plane configuration.
-- [ ] **Safe Reconciliation Drift Repair:** Agreement that reconciliation audits historical windows older than $T - 5\text{min}$ and adjusts drift via delta increments (`INCRBY`) without overwriting active live traffic.
+### Agreed Architectural Baseline:
+- [x] **Agreed Missing-Budget & Enforcement Policy:** Reject requests for explicitly hard-enforced tenants when required budget configuration is missing (HTTP 402 `Payment Required` / `NO_BUDGET_FOR_CURRENCY`). Explicitly unbudgeted and `alert_only` tenants are not rejected solely because a `budget:limit` key is absent. Missing or invalid enforcement metadata fails safely with HTTP 503 `BUDGET_STORE_ERROR`.
+- [x] **Agreed Reconciliation Mechanism (Option C):** Read-only drift detection and audited manual repair. No automated counter mutation or reconstruction. Manual repair requires a scope-wide lock `budget:recon:lock:{budget:<tenantId>:<scopeType>:<scopeId>:<currency>:<period>}` and a verified procedure to fence or drain Gateway writes.
+- [x] **Agreed Cluster DLQ Hash-Tags (In Principle):** Shared hash tags `{usage-events}` and `{usage-events}:dlq` agreed in principle to preserve atomic Lua DLQ-write/source-ack execution in Redis Cluster. Exact stream-key migration and rollback plan must be agreed before deployment.
+- [x] **Crash-Safe Lifecycle & Anti-Clamping Invariants:** Explicit pre-dispatch (`RESERVED_PRE_DISPATCH`) vs post-dispatch (`DISPATCHED_IN_FLIGHT`) distinction; in-flight requests never released on deadline expiry; counter underflow returns `UNDERFLOW_ON_REAP` / `INVARIANT_RESERVED_UNDERFLOW` rather than clamping to zero.
+
+### Pre-Implementation Readiness Gates (Task 3.2 BLOCKED):
+Before Gateway code implementation or Lua deployment begins, the following gates must be satisfied:
+- [ ] **Stream Migration & Rollback Runbook:** Documented and agreed cutover procedure for `{usage-events}` and `{usage-events}:dlq` in Redis Cluster without message loss.
+- [ ] **Manual Repair Operational Runbook:** Documented runbook detailing Gateway writer fencing and drain procedures under scope-wide lock `budget:recon:lock:{budget:...}`.
+- [ ] **Window Initialization Protocol:** Owning mechanism to initialize new calendar windows and distinguish legitimately fresh windows from unexpectedly evicted mid-window counters (eliminating unsafe `GET or '0'`).
+- [ ] **Audited Manual Repair Tooling Contract (RELEASED_RECONCILED):** Defined tooling, verification checks, and authorization workflow for resolving uncertain/orphaned requests to `RELEASED_RECONCILED` under writer fencing.
+- [ ] **Pre-Implementation Test Gate:** Gateway test suite and contract validation ready for atomic reservation, fail-closed handling, and reaper recovery.
 
 ---
 
@@ -950,3 +989,5 @@ Before Task 3.2 Gateway implementation is unblocked, Atharva Pawaskar (M3) must 
 | 2026-10-20 | M1 (Vedant) | 0.2.0 | Addressed PR #29 feedback: Two-phase protocol, currency isolation, micro-units, cluster hash tags. |
 | 2026-10-20 | M1 (Vedant) | 0.3.0 | Architectural hardening: Check-before-capacity reservation idempotency, active reaper lifecycle accounting, exact IEEE-754 mantissa bounds proof. |
 | 2026-10-20 | M1 (Vedant) | 0.4.0 | Fixed verified design flaws: Explicit pre-dispatch vs post-dispatch lifecycle (`RESERVED_PRE_DISPATCH` vs `DISPATCHED_IN_FLIGHT`), prohibited releasing potentially billable reservations on deadline expiry, anti-clamping invariant enforcement (`INVARIANT_RESERVED_UNDERFLOW`), complete identity tuple validation, quarantine review deadline separation from key retention, safe reconciliation delta adjustment, and default fail-closed without request-parameter bypass. |
+| 2026-10-22 | M1 & M3 | 0.5.0 | Formal consensus on 3 architectural decisions: (1) Missing-budget policy: fail-closed 402 for hard enforcement; unbudgeted/alert_only allowed; missing/corrupted metadata fails safely with 503 BUDGET_STORE_ERROR. (2) Option C reconciliation: read-only drift detection + audited manual repair with scope-wide lock budget:recon:lock:{budget:...} and Gateway write fencing; eliminated automated delta mutations. (3) Redis Cluster DLQ shared hash tags {usage-events} agreed in principle; migration and rollback plan required before deployment. Task 3.2 remains blocked pending pre-implementation gates. |
+| 2026-10-22 | M1 & M3 | 0.5.1 | Resolved RFC contradictions and counter safety: (1) Superseded legacy Protocol 5 INCRBY drift adjustment with Option C read-only drift detection. (2) Prohibited automated startup reconstruction of budget:reserved from request hashes and automated rebuild of budget:spend from MongoDB. (3) Marked autonomous reconcile_release_budget.lua and RELEASED_RECONCILED as unresolved pending audited manual repair tooling. (4) Replaced unsafe 'GET spend or 0' fallback with explicit counter safety; documented Window Initialization Protocol as an explicit pre-implementation blocker. |

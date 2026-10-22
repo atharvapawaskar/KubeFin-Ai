@@ -36,6 +36,32 @@ test('preserves sub-micro-unit precision instead of rounding individual events',
   assert.equal(calculateCostAmount({ ...event, usage: { inputTokens: 1, outputTokens: 0 } }, halfMicroRate).toString(), '5.00000E-7');
 });
 
+test('calculates Gemini USD paid-tier costs exactly without double-scaling or rounding error', () => {
+  const geminiUsdRate: PricingRate = {
+    pricingVersion: 2,
+    _id: 'gemini-3.6-flash-usd-2026',
+    provider: 'gemini',
+    model: 'gemini-3.6-flash',
+    currency: 'USD',
+    inputRateMicrosPerMillionTokens: 750_000,
+    outputRateMicrosPerMillionTokens: 3_750_000,
+    effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+    effectiveTo: new Date('2027-01-01T00:00:00Z'),
+    sourceUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+    sourceVerifiedAt: new Date('2026-10-19T00:00:00Z'),
+  };
+
+  // 15 input tokens + 87 output tokens at USD 0.75 / 1M in, USD 3.75 / 1M out -> USD 0.0003375
+  const cost15_87 = calculateCostAmount({ ...event, usage: { inputTokens: 15, outputTokens: 87 } }, geminiUsdRate);
+  assert.equal(cost15_87.toString(), '0.000337500000');
+  assert.equal(Number(cost15_87.toString()), 0.0003375);
+
+  // 12 input tokens + 96 output tokens at the same rates -> USD 0.000369
+  const cost12_96 = calculateCostAmount({ ...event, usage: { inputTokens: 12, outputTokens: 96 } }, geminiUsdRate);
+  assert.equal(cost12_96.toString(), '0.000369000000');
+  assert.equal(Number(cost12_96.toString()), 0.000369);
+});
+
 test('rejects unsafe token counts and unsafe rates', () => {
   assert.throws(
     () => calculateCostAmount({ ...event, usage: { inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 0 } }, rate),

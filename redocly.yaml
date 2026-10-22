@@ -1,0 +1,10 @@
+apis:
+  gateway@v1:
+    root: contracts/api/gateway-api.yaml
+
+extends:
+  - recommended
+
+rules:
+  no-server-example.com: off
+  operation-4xx-response: off

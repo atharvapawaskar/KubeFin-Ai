@@ -1,0 +1,52 @@
+[
+  {
+    "_id": "gemini-3.6-flash-usd-2026",
+    "pricingVersion": 2,
+    "provider": "gemini",
+    "model": "gemini-3.6-flash",
+    "currency": "USD",
+    "inputRateMicrosPerMillionTokens": 750000,
+    "outputRateMicrosPerMillionTokens": 3750000,
+    "effectiveFrom": "2026-01-01T00:00:00.000Z",
+    "effectiveTo": "2027-01-01T00:00:00.000Z",
+    "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+    "sourceVerifiedAt": "2026-10-19T00:00:00.000Z"
+  },
+  {
+    "_id": "gemini-3.6-flash-usd-2027",
+    "pricingVersion": 2,
+    "provider": "gemini",
+    "model": "gemini-3.6-flash",
+    "currency": "USD",
+    "inputRateMicrosPerMillionTokens": 1500000,
+    "outputRateMicrosPerMillionTokens": 7500000,
+    "effectiveFrom": "2027-01-01T00:00:00.000Z",
+    "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+    "sourceVerifiedAt": "2026-10-19T00:00:00.000Z"
+  },
+  {
+    "_id": "gemini-3.8-flash-usd-2026",
+    "pricingVersion": 2,
+    "provider": "gemini",
+    "model": "gemini-3.8-flash",
+    "currency": "USD",
+    "inputRateMicrosPerMillionTokens": 750000,
+    "outputRateMicrosPerMillionTokens": 3750000,
+    "effectiveFrom": "2026-01-01T00:00:00.000Z",
+    "effectiveTo": "2027-01-01T00:00:00.000Z",
+    "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+    "sourceVerifiedAt": "2026-10-19T00:00:00.000Z"
+  },
+  {
+    "_id": "gemini-3.8-flash-usd-2027",
+    "pricingVersion": 2,
+    "provider": "gemini",
+    "model": "gemini-3.8-flash",
+    "currency": "USD",
+    "inputRateMicrosPerMillionTokens": 1500000,
+    "outputRateMicrosPerMillionTokens": 7500000,
+    "effectiveFrom": "2027-01-01T00:00:00.000Z",
+    "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+    "sourceVerifiedAt": "2026-10-19T00:00:00.000Z"
+  }
+]

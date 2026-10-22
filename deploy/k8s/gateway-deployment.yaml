@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubefin-gateway
+  labels:
+    app.kubernetes.io/name: kubefin-gateway
+    app.kubernetes.io/part-of: kubefin
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubefin-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubefin-gateway
+        app.kubernetes.io/part-of: kubefin
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: kubefin-gateway:local
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: TENANT_ID
+              value: "default-tenant"
+            - name: DEFAULT_PROVIDER
+              value: "gemini"
+            - name: GEMINI_MODEL
+              value: "gemini-1.5-flash"
+            - name: GEMINI_TIMEOUT_MS
+              value: "30000"
+            - name: REDIS_USAGE_STREAM
+              value: "usage-events"
+            - name: REDIS_ENABLED
+              value: "true"
+            - name: REDIS_MAX_RETRIES
+              value: "3"
+            - name: REDIS_RETRY_DELAY_MS
+              value: "100"
+            - name: RATE_LIMIT_ENABLED
+              value: "true"
+            - name: RATE_LIMIT_MAX_REQUESTS
+              value: "60"
+            - name: RATE_LIMIT_WINDOW_MS
+              value: "60000"
+            - name: RATE_LIMIT_FAILURE_MODE
+              value: "fail-closed"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: GATEWAY_MAX_PAYLOAD_BYTES
+              value: "1048576"
+            - name: CIRCUIT_BREAKER_ENABLED
+              value: "true"
+            - name: CIRCUIT_BREAKER_FAILURE_THRESHOLD
+              value: "5"
+            - name: CIRCUIT_BREAKER_RESET_TIMEOUT_MS
+              value: "30000"
+            - name: CIRCUIT_BREAKER_HALF_OPEN_PROBES
+              value: "1"
+            - name: UPSTREAM_MAX_RETRIES
+              value: "2"
+            - name: UPSTREAM_RETRY_BASE_DELAY_MS
+              value: "200"
+            - name: UPSTREAM_RETRY_MAX_DELAY_MS
+              value: "2000"
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubefin-gateway-runtime
+                  key: API_KEY
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubefin-gateway-runtime
+                  key: GEMINI_API_KEY
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kubefin-gateway-runtime
+                  key: REDIS_URL
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi

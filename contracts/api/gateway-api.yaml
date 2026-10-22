@@ -1,0 +1,720 @@
+openapi: 3.0.3
+info:
+  title: Kubefin AI Gateway API
+  version: 0.1.0
+  description: |
+    OpenAI-compatible AI Gateway API for Kubefin.
+    Accepts chat completion requests from consumer workloads, authenticates callers
+    via API keys, enforces rate limits, token ceilings, and model allow-lists, forwards
+    requests to upstream providers (Google Gemini, OpenAI, Anthropic, Ollama) with circuit-breaker protection
+    and exponential retry backoff, and asynchronously emits usage events to Redis Streams
+    for cost calculation and rollups.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+  - url: http://localhost:3000
+    description: Local development gateway server
+tags:
+  - name: chat
+    description: OpenAI-compatible chat completion operations
+  - name: operations
+    description: Operational, diagnostic, and metrics endpoints
+paths:
+  /v1/chat/completions:
+    post:
+      tags:
+        - chat
+      summary: Create a chat completion
+      operationId: createChatCompletion
+      description: |
+        Creates a model response for the given chat conversation.
+        Accepts OpenAI-compatible chat completion payloads and forwards them to configured upstream
+        providers (Google Gemini, OpenAI, Anthropic, Ollama) based on model prefix or pattern.
+        When trustworthy token usage metadata is reported by the upstream provider, the Gateway
+        asynchronously emits a usage event to the Redis Stream 'usage-events'.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: x-request-id
+          in: header
+          required: false
+          description: |
+            Optional correlation ID for end-to-end tracing and attribution.
+            Must be a non-empty string with maximum length of 256 characters without ASCII control characters.
+            If omitted, the Gateway generates a unique request ID.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: x-team-id
+          in: header
+          required: false
+          description: |
+            Optional team attribution identifier.
+            Must be a non-empty string with maximum length of 256 characters without ASCII control characters.
+            Attributed in emitted usage events.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: x-workload-id
+          in: header
+          required: false
+          description: |
+            Optional workload attribution identifier.
+            Must be a non-empty string with maximum length of 256 characters without ASCII control characters.
+            Attributed in emitted usage events.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      requestBody:
+        required: true
+        description: Chat completion request payload. Body size is capped by GATEWAY_MAX_PAYLOAD_BYTES (default 1 MiB).
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: Successful chat completion.
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+            X-RateLimit-Degraded:
+              $ref: '#/components/headers/X-RateLimit-Degraded'
+            X-Budget-Limit:
+              $ref: '#/components/headers/X-Budget-Limit'
+            X-Budget-Remaining:
+              $ref: '#/components/headers/X-Budget-Remaining'
+            X-Budget-Reset:
+              $ref: '#/components/headers/X-Budget-Reset'
+            X-Budget-Currency:
+              $ref: '#/components/headers/X-Budget-Currency'
+            X-Budget-Degraded:
+              $ref: '#/components/headers/X-Budget-Degraded'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+        '400':
+          description: Bad Request. Validation failure on request body, parameters, JSON structure, or attribution headers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              examples:
+                missingMessages:
+                  summary: Missing or empty messages array
+                  value:
+                    error: Bad Request
+                    message: messages array is required and must not be empty
+                    code: INVALID_REQUEST
+                invalidRole:
+                  summary: Invalid message role
+                  value:
+                    error: Bad Request
+                    message: Each message must have a valid role (system, user, or assistant)
+                    code: INVALID_MESSAGE_ROLE
+                invalidContent:
+                  summary: Message content is not a string
+                  value:
+                    error: Bad Request
+                    message: Each message must have a string content
+                    code: INVALID_MESSAGE_CONTENT
+                invalidTokenCount:
+                  summary: Non-integer or non-positive max_tokens
+                  value:
+                    error: Bad Request
+                    message: max_tokens must be a positive integer greater than or equal to 1
+                    code: INVALID_REQUEST
+                invalidTemperature:
+                  summary: Temperature outside [0, 2] range
+                  value:
+                    error: Bad Request
+                    message: temperature must be a number between 0 and 2
+                    code: INVALID_REQUEST
+                invalidHeader:
+                  summary: Attribution header exceeding 256 characters, whitespace-only, or containing control characters
+                  value:
+                    error: Bad Request
+                    message: 'Invalid x-request-id header: must be a non-empty string with maximum length of 256 characters'
+                    code: INVALID_HEADER
+                invalidJson:
+                  summary: Malformed JSON syntax or prototype property tampering
+                  value:
+                    error: Bad Request
+                    message: Invalid or malformed JSON payload
+                    code: INVALID_JSON
+                excessiveNesting:
+                  summary: JSON payload exceeding maximum nesting depth limit of 32
+                  value:
+                    error: Bad Request
+                    message: Request payload exceeds maximum allowed nesting depth of 32
+                    code: EXCESSIVE_NESTING
+                maxTokensExceeded:
+                  summary: Requested max_tokens exceeds policy ceiling limit
+                  value:
+                    error: Bad Request
+                    message: Requested max_tokens (8192) exceeds maximum permitted limit of 4096
+                    code: MAX_TOKENS_EXCEEDED
+        '401':
+          description: Unauthorized. Missing, malformed, or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              examples:
+                missingHeader:
+                  summary: Missing Authorization header
+                  value:
+                    error: Unauthorized
+                    message: Missing Authorization header
+                    code: MISSING_AUTH_HEADER
+                invalidFormat:
+                  summary: Header not in Bearer token format
+                  value:
+                    error: Unauthorized
+                    message: 'Invalid Authorization header format. Expected: Bearer <API_KEY>'
+                    code: INVALID_AUTH_FORMAT
+                invalidKey:
+                  summary: Invalid API key value
+                  value:
+                    error: Unauthorized
+                    message: Invalid API key
+                    code: INVALID_API_KEY
+        '402':
+          description: Payment Required. Tenant, team, or workload budget limit exceeded, or no budget configured for model currency under hard enforcement.
+          headers:
+            X-Budget-Limit:
+              $ref: '#/components/headers/X-Budget-Limit'
+            X-Budget-Remaining:
+              $ref: '#/components/headers/X-Budget-Remaining'
+            X-Budget-Reset:
+              $ref: '#/components/headers/X-Budget-Reset'
+            X-Budget-Currency:
+              $ref: '#/components/headers/X-Budget-Currency'
+            X-Budget-Degraded:
+              $ref: '#/components/headers/X-Budget-Degraded'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              examples:
+                budgetExceeded:
+                  summary: Budget limit exceeded for the current period window
+                  value:
+                    error: Payment Required
+                    message: Budget limit of $100.00 USD exceeded for tenant 'acme'
+                    code: BUDGET_EXCEEDED
+                noBudgetForCurrency:
+                  summary: No active budget configured for requested model currency under hard enforcement
+                  value:
+                    error: Payment Required
+                    message: No active budget configured for currency USD
+                    code: NO_BUDGET_FOR_CURRENCY
+        '403':
+          description: Forbidden. Model policy violation when model is not permitted by allow-list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              example:
+                error: Forbidden
+                message: Model 'gpt-4' is not allowed
+                code: MODEL_NOT_ALLOWED
+        '413':
+          description: Payload Too Large. Request body exceeds configured GATEWAY_MAX_PAYLOAD_BYTES.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              example:
+                error: Payload Too Large
+                message: Request body exceeds maximum permitted size of 1048576 bytes
+                code: PAYLOAD_TOO_LARGE
+        '429':
+          description: Too Many Requests. Tenant rate limit exceeded or upstream provider rate limit reached.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/Retry-After'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+            X-RateLimit-Degraded:
+              $ref: '#/components/headers/X-RateLimit-Degraded'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              examples:
+                tenantRateLimit:
+                  summary: Gateway tenant rate limit exceeded
+                  value:
+                    error: Too Many Requests
+                    message: Rate limit exceeded. Please try again later.
+                    code: RATE_LIMIT_EXCEEDED
+                providerRateLimit:
+                  summary: Upstream provider rate limit or quota exceeded
+                  value:
+                    error: Too Many Requests
+                    message: Provider rate limit exceeded. Please try again later.
+                    code: PROVIDER_RATE_LIMIT
+        '409':
+          description: Conflict. Idempotency key or request correlation identifier reused with conflicting parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              example:
+                error: Conflict
+                message: 'Idempotency conflict: request parameters do not match existing reservation for this request identifier'
+                code: CONFLICT_REQUEST_MISMATCH
+        '501':
+          description: Not Implemented. Returned when streaming is requested.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              example:
+                error: Not Implemented
+                message: Streaming is not supported yet
+                code: STREAMING_NOT_SUPPORTED
+        '502':
+          description: Bad Gateway. Upstream provider configuration error or failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              examples:
+                providerAuthError:
+                  summary: Provider API key invalid
+                  value:
+                    error: Bad Gateway
+                    message: Invalid provider API key configuration
+                    code: PROVIDER_AUTH_ERROR
+                providerError:
+                  summary: Upstream provider failure
+                  value:
+                    error: Bad Gateway
+                    message: 'Provider error: The upstream provider encountered an error while processing the request'
+                    code: PROVIDER_ERROR
+        '503':
+          description: Service Unavailable. Circuit breaker open, rate limiter store failure, or budget store failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              examples:
+                circuitBreakerOpen:
+                  summary: Upstream circuit breaker open
+                  value:
+                    error: Service Unavailable
+                    message: Upstream circuit breaker is OPEN. Fast-failing request.
+                    code: CIRCUIT_BREAKER_OPEN
+                rateLimitStoreError:
+                  summary: Rate limiter store failure in fail-closed mode
+                  value:
+                    error: Service Unavailable
+                    message: 'Rate limiter error: Unable to verify rate limit due to store failure'
+                    code: RATE_LIMIT_ERROR
+                budgetStoreError:
+                  summary: Budget enforcement store failure in fail-closed mode
+                  value:
+                    error: Service Unavailable
+                    message: 'Budget store error: Unable to verify budget allocation due to store failure'
+                    code: BUDGET_STORE_ERROR
+        '504':
+          description: Gateway Timeout. Upstream AI provider request timed out or aborted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              example:
+                error: Gateway Timeout
+                message: 'Provider timeout: The upstream provider request timed out'
+                code: PROVIDER_TIMEOUT
+  /health:
+    get:
+      tags:
+        - operations
+      summary: Service health check
+      operationId: getHealth
+      description: Public liveness and status endpoint. Does not require authentication.
+      security: []
+      responses:
+        '200':
+          description: Gateway is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /metrics:
+    get:
+      tags:
+        - operations
+      summary: Prometheus metrics endpoint
+      operationId: getMetrics
+      description: |
+        Exposes Prometheus exposition format (version 0.0.4) metrics for operational
+        and business monitoring (HTTP requests, durations, provider status, rate limit rejections).
+        Public by default unless METRICS_AUTH_TOKEN is configured.
+      security:
+        - metricsAuth: []
+        - {}
+      responses:
+        '200':
+          description: Prometheus metrics in exposition text format.
+          content:
+            text/plain; version=0.0.4; charset=utf-8:
+              schema:
+                type: string
+                example: |
+                  # HELP gateway_http_requests_total Total number of HTTP requests processed by Gateway
+                  # TYPE gateway_http_requests_total counter
+                  gateway_http_requests_total{method="POST",route="/v1/chat/completions",status="200"} 42
+        '401':
+          description: Unauthorized. Invalid or missing metrics authorization token when METRICS_AUTH_TOKEN is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              example:
+                error: Unauthorized
+                message: Invalid or missing metrics authorization token
+                code: UNAUTHORIZED_METRICS_ACCESS
+        '404':
+          description: Not Found. Metrics endpoint is disabled via configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+              example:
+                error: Not Found
+                message: Metrics endpoint is disabled
+                code: METRICS_DISABLED
+  /v1/test-auth:
+    get:
+      tags:
+        - operations
+      summary: Test authentication
+      operationId: testAuth
+      description: Protected diagnostic endpoint verifying that the provided Bearer API key is valid.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successfully authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestAuthResponse'
+        '401':
+          description: Unauthorized. Missing, malformed, or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: APIKey
+      description: |
+        Kubefin Gateway API key authentication.
+        Provide the API key as a Bearer token in the HTTP Authorization header:
+        `Authorization: Bearer <API_KEY>`
+    metricsAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Token
+      description: |
+        Optional Prometheus metrics scraping authorization token.
+        When METRICS_AUTH_TOKEN is configured in Gateway, provide the token as:
+        `Authorization: Bearer <METRICS_AUTH_TOKEN>`
+  headers:
+    X-RateLimit-Limit:
+      description: Maximum number of requests allowed in the rate limit window.
+      schema:
+        type: integer
+        example: 60
+    X-RateLimit-Remaining:
+      description: Number of remaining requests allowed in the current rate limit window.
+      schema:
+        type: integer
+        example: 59
+    X-RateLimit-Reset:
+      description: Unix epoch timestamp (in seconds) when the rate limit window resets.
+      schema:
+        type: integer
+        example: 1729267260
+    X-RateLimit-Degraded:
+      description: Present with value 'true' when the rate limiter is operating in fail-open degraded mode due to Redis store failure.
+      schema:
+        type: string
+        example: 'true'
+    Retry-After:
+      description: Number of seconds to wait before retrying when rate-limited.
+      schema:
+        type: integer
+        example: 60
+    X-Budget-Limit:
+      description: Configured budget limit amount in active budget currency.
+      schema:
+        type: string
+        example: '100.00'
+    X-Budget-Remaining:
+      description: Remaining spend permitted before the budget ceiling is reached.
+      schema:
+        type: string
+        example: '54.77'
+    X-Budget-Reset:
+      description: UTC date or ISO timestamp when the current budget period window resets.
+      schema:
+        type: string
+        example: '2026-11-01T00:00:00.000Z'
+    X-Budget-Currency:
+      description: ISO 4217 currency code of the active budget.
+      schema:
+        type: string
+        example: 'USD'
+    X-Budget-Degraded:
+      description: Present with value 'true' when budget enforcement is operating in fail-open degraded mode due to Redis store outage.
+      schema:
+        type: string
+        example: 'true'
+  schemas:
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant]
+          description: The role of the message author.
+        content:
+          type: string
+          description: The text content of the message.
+    ChatCompletionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - messages
+      properties:
+        model:
+          type: string
+          description: |
+            Model identifier to use for completion (e.g., gemini-1.5-flash, gpt-4o, claude-3-5-sonnet-20241022, llama3, or provider-prefixed such as openai/gpt-4o, anthropic/claude-3-5-sonnet, ollama/llama3).
+            If omitted, defaults to the server-configured model (e.g., gemini-1.5-flash).
+            Must match one of GATEWAY_ALLOWED_MODELS if policy engine allow-list is active.
+          example: gemini-1.5-flash
+        messages:
+          type: array
+          minItems: 1
+          description: A non-empty list of messages comprising the conversation.
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+          default: 0.7
+          description: Sampling temperature between 0 and 2.
+        max_tokens:
+          type: integer
+          minimum: 1
+          default: 2048
+          description: |
+            Maximum number of tokens to generate in the completion.
+            Must be a positive integer >= 1 and not exceed GATEWAY_MAX_TOKENS_LIMIT when configured.
+        stream:
+          type: boolean
+          default: false
+          description: |
+            Whether to stream response chunks.
+            Note: Streaming is currently not supported by the Gateway and returns HTTP 501.
+    ChatCompletionChoiceMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [assistant]
+          description: The role of the author, always 'assistant'.
+        content:
+          type: string
+          description: The generated message text content.
+    ChatCompletionChoice:
+      type: object
+      additionalProperties: false
+      required:
+        - index
+        - message
+        - finish_reason
+      properties:
+        index:
+          type: integer
+          description: The index of the choice in the list of choices.
+          example: 0
+        message:
+          $ref: '#/components/schemas/ChatCompletionChoiceMessage'
+        finish_reason:
+          type: string
+          enum: [stop, length, content_filter, empty_response]
+          description: The reason the model stopped generating tokens.
+          example: stop
+    UsageStatistics:
+      type: object
+      additionalProperties: false
+      required:
+        - prompt_tokens
+        - completion_tokens
+        - total_tokens
+      properties:
+        prompt_tokens:
+          type: integer
+          minimum: 0
+          description: Number of prompt / input tokens reported by the provider.
+        completion_tokens:
+          type: integer
+          minimum: 0
+          description: Number of completion / output tokens reported by the provider.
+        total_tokens:
+          type: integer
+          minimum: 0
+          description: Total tokens used (prompt_tokens + completion_tokens).
+    ChatCompletionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - object
+        - created
+        - model
+        - choices
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the chat completion.
+          example: chatcmpl-1729267200000-a1b2c3d4
+        object:
+          type: string
+          enum: [chat.completion]
+          description: The object type, always 'chat.completion'.
+          example: chat.completion
+        created:
+          type: integer
+          description: Unix timestamp (in seconds) of when the completion was generated.
+          example: 1729267200
+        model:
+          type: string
+          description: The effective model used to generate the completion.
+          example: gemini-1.5-flash
+        choices:
+          type: array
+          description: List of completion choices generated by the provider.
+          items:
+            $ref: '#/components/schemas/ChatCompletionChoice'
+        usage:
+          $ref: '#/components/schemas/UsageStatistics'
+    GatewayError:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+        - message
+        - code
+      properties:
+        error:
+          type: string
+          description: High-level HTTP error description.
+        message:
+          type: string
+          description: Detailed explanation of the error.
+        code:
+          type: string
+          description: Stable machine-readable error code.
+          enum:
+            - INVALID_REQUEST
+            - INVALID_MESSAGE_ROLE
+            - INVALID_MESSAGE_CONTENT
+            - INVALID_HEADER
+            - INVALID_JSON
+            - EXCESSIVE_NESTING
+            - MAX_TOKENS_EXCEEDED
+            - MISSING_AUTH_HEADER
+            - INVALID_AUTH_FORMAT
+            - INVALID_API_KEY
+            - MODEL_NOT_ALLOWED
+            - PAYLOAD_TOO_LARGE
+            - RATE_LIMIT_EXCEEDED
+            - PROVIDER_RATE_LIMIT
+            - BUDGET_EXCEEDED
+            - NO_BUDGET_FOR_CURRENCY
+            - BUDGET_STORE_ERROR
+            - CONFLICT_REQUEST_MISMATCH
+            - STREAMING_NOT_SUPPORTED
+            - PROVIDER_AUTH_ERROR
+            - PROVIDER_ERROR
+            - CIRCUIT_BREAKER_OPEN
+            - RATE_LIMIT_ERROR
+            - PROVIDER_TIMEOUT
+            - UNAUTHORIZED_METRICS_ACCESS
+            - METRICS_DISABLED
+            - INTERNAL_SERVER_ERROR
+            - BAD_REQUEST
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - timestamp
+        - service
+        - version
+      properties:
+        status:
+          type: string
+          example: ok
+        timestamp:
+          type: string
+          format: date-time
+        service:
+          type: string
+          example: gateway
+        version:
+          type: string
+          example: 0.1.0
+    TestAuthResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - message
+        - tenantId
+        - apiKeyPrefix
+      properties:
+        message:
+          type: string
+          example: Authenticated successfully
+        tenantId:
+          type: string
+          description: The authenticated tenant identifier.
+          example: default-tenant
+        apiKeyPrefix:
+          type: string
+          description: The first 8 characters of the provided API key.
+          example: abc12345

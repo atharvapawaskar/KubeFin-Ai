@@ -19,7 +19,10 @@ export interface DeadLetterRecord {
   sourceStream: string;
   sourceEntryId: string;
   failedAt: string;
-  failureCode: 'INVALID_STREAM_ENVELOPE' | 'INVALID_EVENT_SCHEMA' | 'PERSISTENCE_RETRIES_EXHAUSTED';
+  failureCode:
+    | 'INVALID_STREAM_ENVELOPE'
+    | 'INVALID_EVENT_SCHEMA'
+    | 'PERSISTENCE_RETRIES_EXHAUSTED';
   attempts: number;
   payload?: string;
   payloadBytes: number;
@@ -28,7 +31,13 @@ export interface DeadLetterRecord {
 
 export interface UsageStreamPort {
   createGroup(stream: string, group: string): Promise<void>;
-  readNew(stream: string, group: string, consumer: string, count: number, blockMs: number): Promise<StreamEntry[]>;
+  readNew(
+    stream: string,
+    group: string,
+    consumer: string,
+    count: number,
+    blockMs: number,
+  ): Promise<StreamEntry[]>;
   claimPending(
     stream: string,
     group: string,
@@ -37,7 +46,11 @@ export interface UsageStreamPort {
     startId: string,
     count: number,
   ): Promise<{ nextId: string; entries: StreamEntry[]; deletedIds: string[] }>;
-  getPending(stream: string, group: string, entryId: string): Promise<PendingEntry | undefined>;
+  getPending(
+    stream: string,
+    group: string,
+    entryId: string,
+  ): Promise<PendingEntry | undefined>;
   acknowledge(stream: string, group: string, entryId: string): Promise<void>;
   deadLetterAndAcknowledge(
     stream: string,
@@ -73,7 +86,9 @@ export interface UsageStreamConsumerDependencies {
   sink: UsageEventSink;
   logger: ConsumerLogger;
   config: UsageStreamConsumerConfig;
-  onOutcome?: (outcome: 'inserted' | 'duplicate' | 'unpriced' | 'dead_lettered' | 'retrying') => void;
+  onOutcome?: (
+    outcome: 'inserted' | 'duplicate' | 'unpriced' | 'dead_lettered' | 'retrying',
+  ) => void;
   onProcessingDuration?: (seconds: number) => void;
   onStreamLag?: (messages: number) => void;
 }
@@ -84,6 +99,7 @@ export class UsageStreamConsumer {
   async run(signal: AbortSignal): Promise<void> {
     const { config, stream } = this.dependencies;
     await stream.createGroup(config.stream, config.group);
+
     let claimCursor = '0-0';
     let lastLagSampleAt = 0;
 
@@ -111,17 +127,27 @@ export class UsageStreamConsumer {
         }
 
         const now = Date.now();
-        if (this.dependencies.onStreamLag && stream.getLagMessages && now - lastLagSampleAt >= 10_000) {
+
+        if (
+          this.dependencies.onStreamLag &&
+          stream.getLagMessages &&
+          now - lastLagSampleAt >= 10_000
+        ) {
           lastLagSampleAt = now;
+
           try {
             const lag = await stream.getLagMessages(config.stream, config.group);
-            if (lag !== undefined && Number.isSafeInteger(lag) && lag >= 0) this.dependencies.onStreamLag(lag);
+
+            if (lag !== undefined && Number.isSafeInteger(lag) && lag >= 0) {
+              this.dependencies.onStreamLag(lag);
+            }
           } catch {
             // Metrics must not prevent event processing when Redis lacks lag metadata.
           }
         }
 
         claimCursor = claimed.nextId;
+
         if (claimCursor !== '0-0') continue;
 
         const fresh = await stream.readNew(
@@ -131,12 +157,17 @@ export class UsageStreamConsumer {
           config.batchSize,
           config.blockMs,
         );
+
         for (const entry of fresh) {
           if (signal.aborted) return;
           await this.processEntry(entry);
         }
-      } catch {
-        this.dependencies.logger.warn({}, 'Redis stream polling failed; retrying with backoff');
+      } catch (error) {
+        this.dependencies.logger.warn(
+          { err: error instanceof Error ? error.message : String(error) },
+          'Redis stream polling failed; retrying with backoff',
+        );
+
         await delay(1_000, undefined, { signal }).catch(() => undefined);
       }
     }
@@ -144,17 +175,22 @@ export class UsageStreamConsumer {
 
   private async processEntry(entry: StreamEntry): Promise<void> {
     const startedAt = performance.now();
+
     try {
       await this.processEntryInternal(entry);
     } finally {
       const seconds = (performance.now() - startedAt) / 1_000;
-      if (Number.isFinite(seconds) && seconds >= 0) this.dependencies.onProcessingDuration?.(seconds);
+
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        this.dependencies.onProcessingDuration?.(seconds);
+      }
     }
   }
 
   private async processEntryInternal(entry: StreamEntry): Promise<void> {
     const { config, stream, sink, logger } = this.dependencies;
     const rawPayload = entry.fields.payload;
+
     let persisted = false;
     let persistenceFailed = false;
     let deadLettered = false;
@@ -163,11 +199,13 @@ export class UsageStreamConsumer {
       if (typeof payload !== 'string') {
         return { valid: false, issues: [{ code: 'INVALID_STREAM_ENVELOPE' }] };
       }
+
       if (Buffer.byteLength(payload, 'utf8') > config.maxPayloadBytes) {
         return { valid: false, issues: [{ code: 'INVALID_STREAM_ENVELOPE' }] };
       }
 
       let decoded: unknown;
+
       try {
         decoded = JSON.parse(payload);
       } catch {
@@ -175,6 +213,7 @@ export class UsageStreamConsumer {
       }
 
       const parsed = usageEventSchema.safeParse(decoded);
+
       if (!parsed.success) {
         return {
           valid: false,
@@ -184,6 +223,7 @@ export class UsageStreamConsumer {
           })),
         };
       }
+
       return { valid: true, event: parsed.data };
     };
 
@@ -192,6 +232,7 @@ export class UsageStreamConsumer {
         { id: entry.id, payload: rawPayload },
         {
           validate: validation,
+
           persistIdempotently: async (event) => {
             try {
               const result = await sink.persistIdempotently(event);
@@ -202,45 +243,83 @@ export class UsageStreamConsumer {
               throw error;
             }
           },
+
           deadLetter: async (_delivery, issues) => {
-            const pending = await stream.getPending(config.stream, config.group, entry.id);
-            await stream.deadLetterAndAcknowledge(config.stream, config.group, entry.id, {
-              sourceStream: config.stream,
-              sourceEntryId: entry.id,
-              failedAt: new Date().toISOString(),
-              failureCode: issues.some((issue) => (issue as { code?: string }).code === 'INVALID_STREAM_ENVELOPE')
-                ? 'INVALID_STREAM_ENVELOPE'
-                : 'INVALID_EVENT_SCHEMA',
-              attempts: pending?.deliveries ?? 1,
-              ...this.payloadForDeadLetter(rawPayload, false),
-            });
+            const pending = await stream.getPending(
+              config.stream,
+              config.group,
+              entry.id,
+            );
+
+            await stream.deadLetterAndAcknowledge(
+              config.stream,
+              config.group,
+              entry.id,
+              {
+                sourceStream: config.stream,
+                sourceEntryId: entry.id,
+                failedAt: new Date().toISOString(),
+                failureCode: issues.some(
+                  (issue) =>
+                    (issue as { code?: string }).code === 'INVALID_STREAM_ENVELOPE',
+                )
+                  ? 'INVALID_STREAM_ENVELOPE'
+                  : 'INVALID_EVENT_SCHEMA',
+                attempts: pending?.deliveries ?? 1,
+                ...this.payloadForDeadLetter(rawPayload, false),
+              },
+            );
+
             deadLettered = true;
           },
+
           acknowledge: async (id) => {
-            if (!deadLettered) await stream.acknowledge(config.stream, config.group, id);
+            if (!deadLettered) {
+              await stream.acknowledge(config.stream, config.group, id);
+            }
           },
         },
       );
-      this.dependencies.onOutcome?.(outcome === 'dead-lettered' ? 'dead_lettered' : outcome);
+
+      this.dependencies.onOutcome?.(
+        outcome === 'dead-lettered' ? 'dead_lettered' : outcome,
+      );
     } catch {
       if (persisted || deadLettered) {
         // The durable operation succeeded; the acknowledgement may have failed.
         // Redelivery is safe because MongoDB uses eventId as its unique _id.
-        logger.warn({ streamEntryId: entry.id }, 'Usage event acknowledgement failed; delivery remains recoverable');
+        logger.warn(
+          { streamEntryId: entry.id },
+          'Usage event acknowledgement failed; delivery remains recoverable',
+        );
         return;
       }
 
-      const pending = await stream.getPending(config.stream, config.group, entry.id).catch(() => undefined);
-      if (persistenceFailed && pending && pending.deliveries >= config.maxDeliveries && typeof rawPayload === 'string') {
+      const pending = await stream
+        .getPending(config.stream, config.group, entry.id)
+        .catch(() => undefined);
+
+      if (
+        persistenceFailed &&
+        pending &&
+        pending.deliveries >= config.maxDeliveries &&
+        typeof rawPayload === 'string'
+      ) {
         try {
-          await stream.deadLetterAndAcknowledge(config.stream, config.group, entry.id, {
-            sourceStream: config.stream,
-            sourceEntryId: entry.id,
-            failedAt: new Date().toISOString(),
-            failureCode: 'PERSISTENCE_RETRIES_EXHAUSTED',
-            attempts: pending.deliveries,
-            ...this.payloadForDeadLetter(rawPayload, true),
-          });
+          await stream.deadLetterAndAcknowledge(
+            config.stream,
+            config.group,
+            entry.id,
+            {
+              sourceStream: config.stream,
+              sourceEntryId: entry.id,
+              failedAt: new Date().toISOString(),
+              failureCode: 'PERSISTENCE_RETRIES_EXHAUSTED',
+              attempts: pending.deliveries,
+              ...this.payloadForDeadLetter(rawPayload, true),
+            },
+          );
+
           this.dependencies.onOutcome?.('dead_lettered');
           return;
         } catch {
@@ -249,7 +328,11 @@ export class UsageStreamConsumer {
       }
 
       this.dependencies.onOutcome?.('retrying');
-      logger.warn({ streamEntryId: entry.id }, 'Usage event processing failed; delivery left pending for retry');
+
+      logger.warn(
+        { streamEntryId: entry.id },
+        'Usage event processing failed; delivery left pending for retry',
+      );
     }
   }
 
@@ -260,9 +343,11 @@ export class UsageStreamConsumer {
     const bytes = Buffer.from(payload ?? '', 'utf8');
     const payloadBytes = bytes.byteLength;
     const payloadSha256 = createHash('sha256').update(bytes).digest('hex');
+
     if (includeBody && payloadBytes <= this.dependencies.config.maxPayloadBytes) {
       return { payload: payload ?? '', payloadBytes, payloadSha256 };
     }
+
     return { payloadBytes, payloadSha256 };
   }
 }
