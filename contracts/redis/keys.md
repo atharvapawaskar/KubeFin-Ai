@@ -14,7 +14,7 @@ This contract defines the physical Redis key naming conventions, storage schemas
 - **Rate Limiting (Gateway M1):** Tenant request rate limiting counters (`IMPLEMENTED`).
 - **Event Streaming & Ingestion (Gateway M1 & Worker M3):** Stage 2 usage event streams, consumer groups, and dead-letter queues (`IMPLEMENTED`).
 - **Budget Enforcement (Gateway M1 & Control Plane M2):** Currency-specific real-time budget limits, spend counters, reservation counters, request records, reservation expiry sorted sets, and metadata hashes (`PROPOSED`).
-- **Reconciliation & Drift Correction (Worker M3 / Shared):** Ledger reconciliation status keys and locks (`UNRESOLVED`).
+- **Reconciliation & Drift Correction (Worker M3 / Shared):** Ledger reconciliation status keys and locks (`PROPOSED` — Option C agreed).
 
 ### Out of Scope
 - Usage event JSON payload schema (owned exclusively by [`contracts/events/usage-event.v1.json`](file:///home/vvedantrathod/MERN/WT%20Project/kubefin/contracts/events/usage-event.v1.json)).
@@ -261,7 +261,7 @@ Every multi-key Lua script in Stage 3 (`reserve_budget.lua`, `mark_dispatched.lu
 10. **Initialization rules:** Written atomically by `reserve_budget.lua` in state `RESERVED_PRE_DISPATCH`.
 11. **Lifecycle and expiry:**
     - Non-terminal states (`RESERVED_PRE_DISPATCH`, `DISPATCHED_IN_FLIGHT`, `UNCERTAIN_HELD`, `ORPHANED_DISPATCHED_UNCERTAIN`): **NO TTL**.
-    - Terminal states (`SETTLED`, `RELEASED_*`, `EXPIRED_UNBILLED`): `EXPIRE` set to window retention TTL (48h daily / 35d monthly).
+    - Terminal states (`SETTLED`, `RELEASED_*`, `EXPIRED_UNBILLED`): `EXPIRE` set to window retention TTL (48h daily / 35d monthly). *(Discrepancy Note: Pending M1/M3 pre-implementation decision on whether monthly terminal records should remain 35d window-only or be aligned to 42d to match `budget:spend` with the 7-day grace period).*
 12. **Idempotency and uniqueness:** Uniquely keyed by `<eventId>`. Repeated reservation attempts with the same `<eventId>` return deterministic responses without duplicate increments.
 13. **Failure behavior:** If hash is missing during settlement or dispatch, script returns `NO_ACTIVE_RESERVATION` or `CORRUPTED_REQUEST_RECORD`.
 14. **Evidence/status:** `PROPOSED` (defined in `contracts/redis/rfc-budget-enforcement.md`, Section 5.1).
@@ -460,8 +460,10 @@ M1 (Gateway) and M3 (Worker / Control Plane) have reached explicit agreement on 
 Task 3.2 remains strictly blocked until the following pre-implementation gates are satisfied:
 1. **Stream Migration & Rollback Plan:** Formal procedure for deploying `{usage-events}` and draining legacy `usage-events` without orphaning in-flight messages.
 2. **Manual Repair Operational Runbook:** Detailed runbook for acquiring the scope lock, fencing Gateway writes, auditing drift against MongoDB, and verifying counter adjustments.
-3. **Control Plane Sync Protocol:** Mechanism for synchronizing MongoDB `budgets` updates to Redis `budget:limit` and `budget:meta` (direct write vs change streams vs periodic refresh).
-4. **Pre-Implementation Verification Tests:** Test suite verifying atomic reservation, fail-closed handling, and reaper recovery ready for execution.
+3. **Window Initialization Protocol:** Owning mechanism to initialize new calendar windows and distinguish legitimately fresh windows from unexpectedly evicted mid-window counters (eliminating unsafe `GET or '0'`).
+4. **Monthly Request Record Retention Alignment:** Decision on whether monthly terminal `budget:req` records expire at 35 days (window-only) or 42 days (matching `budget:spend` 35d window + 7d grace).
+5. **Control Plane Sync Protocol:** Mechanism for synchronizing MongoDB `budgets` updates to Redis `budget:limit` and `budget:meta` (direct write vs change streams vs periodic refresh).
+6. **Pre-Implementation Verification Tests:** Test suite verifying atomic reservation, fail-closed handling, and reaper recovery ready for execution.
 
 ---
 
@@ -483,4 +485,4 @@ Task 3.2 remains strictly blocked until the following pre-implementation gates a
 - [x] Missing counter fail-closed safety rules prominently featured.
 - [x] Stage 2 stream and DLQ payload privacy rules verified against worker implementation.
 - [x] Ownership matrix clearly separates M1 Gateway, M2 Control Plane, and M3 Worker responsibilities.
-- [x] Unsupported reconciliation keys explicitly labeled `UNRESOLVED`.
+- [x] Unsupported automated reconciliation mechanisms permanently rejected; Option C manual repair keys classified as PROPOSED.
