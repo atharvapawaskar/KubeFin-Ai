@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import { getTeamBudgets } from '../../api/endpoints'
@@ -11,12 +12,16 @@ function barColor(pct: number) {
 export default function TeamBudgets() {
   const { data, isLoading, isError } = useQuery({ queryKey: ['team-budgets'], queryFn: getTeamBudgets })
 
+  const { day, daysInMonth } = useMemo(() => {
+    const now = new Date()
+    return {
+      day: now.getDate(),
+      daysInMonth: new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(),
+    }
+  }, [])
+
   if (isLoading) return <p className="text-slate-500">Loading...</p>
   if (isError || !data) return <p className="text-red-600">Failed to load data.</p>
-
-  const now = new Date()
-  const day = now.getDate()
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
 
   const totalLimit = data.reduce((s, b) => s + b.limit, 0)
   const totalUsed = data.reduce((s, b) => s + b.used, 0)
